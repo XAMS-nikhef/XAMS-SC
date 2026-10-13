@@ -15,8 +15,8 @@ in a notebook (`load_rga`).
       "comment": "...", "tags": [...], "background": "<file name or null>",
       "operator": "...",
       "units": "A",                           scan values are currents, as given
-      "detector": "Faraday" or "EM",          EM: electron current x gain,
-                                              unless device.em_equiv_ion
+      "detector": "Faraday" or "EM",          EM: electron current, NEGATIVE,
+                                              x gain, unless device.em_equiv_ion
       "scans": [{"scannum": 1, "t": ..., "system_status": ..., "values": [...]}],
       "mean": [...]
     }
@@ -161,13 +161,12 @@ def summary(record: dict, summary_masses: list[float]) -> dict:
     """
     recipe, values = record["recipe"], record.get("mean") or []
     device = record.get("device") or {}
-    # With the electron multiplier on, the device reports electron current
-    # unless its "equivalent ion current" conversion is on. Divided here by
-    # the gain it holds, so EM and Faraday summaries lie on one scale - as
-    # good as that gain's calibration.
-    gain = em_gain(record)
-    if gain:
-        values = [v / gain for v in values]
+    # With the electron multiplier on, the device reports electron current -
+    # negative, and gain times the ion current - unless its "equivalent ion
+    # current" conversion is on. Brought back to ion current here, so EM and
+    # Faraday summaries lie on one scale (as good as the gain's calibration).
+    scale = ion_scale(record)
+    values = [v * scale for v in values]
     sens = device.get("pp_sensitivity_a_per_unit")
     to_mbar = device.get("unit_to_mbar")
     rows = []
@@ -184,10 +183,24 @@ def summary(record: dict, summary_masses: list[float]) -> dict:
             "peaks": rows}
 
 
+# The sign of the EM's output without the device's conversion. Seen on the
+# first EM survey, 13 October 2026: every peak negative, ~85 % of all points
+# below zero; |EM| / Faraday about +30 at 800 V.
+EM_SIGN = -1.0
+
+
+def ion_scale(record: dict) -> float:
+    """What to multiply a saved file's values by to get ion current: 1 for
+    the Faraday cup or when the device converts itself, EM_SIGN / gain for
+    the EM without that conversion."""
+    gain = em_gain(record)
+    return EM_SIGN / gain if gain else 1.0
+
+
 def em_gain(record: dict) -> float | None:
-    """The factor a saved file's values are above ion current: the EM gain
-    when it was taken with the EM and without the device's own conversion,
-    else None."""
+    """The factor a saved file's values are above ion current in size: the EM
+    gain when it was taken with the EM and without the device's own
+    conversion, else None. The sign is EM_SIGN (see ion_scale)."""
     device = record.get("device") or {}
     if record.get("detector") != "EM":
         return None

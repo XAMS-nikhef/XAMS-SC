@@ -1164,13 +1164,39 @@ class TestEmAcquisition:
         assert acq["state"] == "stopped" and "EM switched off" in acq["error"]
 
     def test_the_summary_is_on_the_ion_current_scale(self):
+        """EM values come negative and times the gain (13 October 2026)."""
         recipe = {"name": "x", "channels": [{"mode": "single", "mass": 28, "dwell": 32}]}
         base = {"t_saved": "2026-10-13T20:00:00Z", "file": "f.json", "recipe": recipe,
-                "mean": [1234.57e-12], "device": {"em_gain": 1234.57, "em_equiv_ion": 0}}
-        em_rec = rga_file.summary(base | {"detector": "EM"}, [28])
+                "device": {"em_gain": 1234.57, "em_equiv_ion": 0}}
+        em_rec = rga_file.summary(base | {"detector": "EM", "mean": [-1234.57e-12]}, [28])
         assert em_rec["peaks"][0]["current_a"] == pytest.approx(1e-12)
-        fc = rga_file.summary(base | {"detector": "Faraday"}, [28])
-        assert fc["peaks"][0]["current_a"] == pytest.approx(1234.57e-12)
+        fc = rga_file.summary(base | {"detector": "Faraday", "mean": [2e-12]}, [28])
+        assert fc["peaks"][0]["current_a"] == pytest.approx(2e-12)
         converted = rga_file.summary(
-            base | {"detector": "EM", "device": {"em_gain": 1234.57, "em_equiv_ion": 1}}, [28])
-        assert converted["peaks"][0]["current_a"] == pytest.approx(1234.57e-12)
+            base | {"detector": "EM", "mean": [3e-12],
+                    "device": {"em_gain": 1234.57, "em_equiv_ion": 1}}, [28])
+        assert converted["peaks"][0]["current_a"] == pytest.approx(3e-12)
+
+    def test_a_negative_em_peak_is_found_as_a_peak(self):
+        """The bug of 13 October 2026: the largest value near a mass, taken
+        from raw negative EM values, was the point nearest zero."""
+        recipe = {"name": "x", "channels": [{"mode": "sweep", "start": 27, "stop": 29,
+                                             "ppamu": 10, "dwell": 32}]}
+        ms = rga_file.masses(recipe)
+        raw = [-6e-8 * max(0.0, 1 - abs(m - 28.1) / 0.4) - 1e-14 for m in ms]
+        record = {"t_saved": "t", "file": "f.json", "recipe": recipe, "mean": raw,
+                  "detector": "EM", "device": {"em_gain": 30.0, "em_equiv_ion": 0}}
+        (row,) = rga_file.summary(record, [28])["peaks"]
+        assert row["current_a"] == pytest.approx((6e-8 + 1e-14) / 30)
+
+    def test_the_live_scan_carries_the_scale_and_says_uncalibrated(
+            self, monkeypatch, tmp_path, analyser):
+        service = em_running(monkeypatch, tmp_path, analyser)
+        assert command(service, "_handle_scan", "xams/ack/rga/scan",
+                       action="start", recipe="quick")["ok"]
+        for _ in range(5):
+            service.read()
+        scan = service.bus.last_json("xams/rga/scan")
+        assert scan["scale"] == pytest.approx(-1 / 1234.57)
+        assert scan["gain_calibrated"] is False
+        assert service.bus.last_json("xams/rga/info")["em"]["gain_calibrated"] is False

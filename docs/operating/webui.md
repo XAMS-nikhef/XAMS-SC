@@ -577,7 +577,10 @@ the scans so far can be saved. A scan records which detector took it; the plot
 and the Grafana summary divide EM values by the analyser's gain (shown in the
 state card), so EM and Faraday numbers share one scale — as good as that
 gain's calibration. The gain is set and calibrated in PV MassSpec, never from
-here.
+here; until that is done (`em_gain_calibrated` in `devices.yaml`) the state
+card and the plot say **uncalibrated**, and EM values are relative only. The
+EM's raw output is negative (electron current); the page and the summary
+turn it the right way round.
 
 ### Scanning
 
