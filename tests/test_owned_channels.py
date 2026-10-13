@@ -138,3 +138,15 @@ class TestTheCaenServiceInParticular:
         assert "hv_cathode_stat" in published
         assert "hv_cathode_vset" in published
         assert "hv_cathode_vmon" in published
+
+
+@pytest.mark.parametrize("cls", SERVICES, ids=lambda c: c.name)
+def test_no_service_shadows_the_single_instance_lock(cls):
+    """`BaseService._lock` is the lock FILE that keeps a second copy of a
+    service from starting. The RGA service once assigned its own RLock to the
+    same name: run() then "acquired the lock file" by taking that RLock in the
+    main thread for good, and every command waited on it forever on the MQTT
+    thread - the page timed out and the analyser's channels went stale
+    (13 October 2026)."""
+    from xams_sc.service import SingleInstance
+    assert isinstance(build(cls)._lock, SingleInstance)
