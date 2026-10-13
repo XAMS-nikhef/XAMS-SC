@@ -543,3 +543,26 @@ class TestThePageWithControl:
         client, app, bus = webui
         bus.deliver("xams/rga/scan", json.dumps({"masses": [1, 2], "values": [1e-14, 2e-14]}))
         assert client.get("/api/rga/scan").json()["values"] == [1e-14, 2e-14]
+
+
+class TestCommandsFromTheBusThread:
+    def test_a_command_completes_while_run_holds_the_instance_lock(
+            self, monkeypatch, tmp_path, analyser):
+        """The bug of 13 October 2026, as it happened: run() takes the
+        instance lock in the main thread, and the command arrives on another
+        (paho's network thread). It must finish, not wait forever."""
+        import threading
+
+        service = running(monkeypatch, tmp_path, analyser)
+        assert service._lock.acquire()         # what BaseService.run() does
+        try:
+            worker = threading.Thread(
+                target=service._handle_control,
+                args=("", json.dumps({"action": "take", "by": "tester"})),
+                daemon=True)
+            worker.start()
+            worker.join(timeout=5)
+            assert not worker.is_alive(), "the command hung on another thread"
+        finally:
+            service._lock.release()
+        assert service.bus.last_json("xams/ack/rga/control")["ok"]

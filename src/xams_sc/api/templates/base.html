@@ -378,9 +378,10 @@ every command you send">set</button>
 </nav>
 <main>{% block content %}{% endblock %}</main>
 <footer>
-  Writes the Lake Shore heater and the CAEN setpoints, each validated, read
-  back and audited (DESIGN.md §10, §10a). It cannot enable a channel, switch a
-  board out of LOCAL, or change a board's protection settings — those are hand
+  Writes the Lake Shore heater, the CAEN setpoints and the RGA's control and
+  scans, each validated, read back and audited (DESIGN.md §10, §10a). It
+  cannot enable a channel, switch a board out of LOCAL, change a board's
+  protection settings or switch the RGA's emission — those are hand
   operations at the instrument. Bound to 127.0.0.1 only.
 </footer>
 <script>

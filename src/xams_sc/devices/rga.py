@@ -119,7 +119,11 @@ class RgaService(BaseService):
         self._recipes: dict[str, dict] = {}
         self._recipe_error: str | None = None
         self._acq: dict | None = None          # the current or last acquisition
-        self._lock = threading.RLock()         # guards _acq and _last_activity
+        # NOT `self._lock`: BaseService uses that name for the single-instance
+        # lock file. Shadowing it once made run() take THIS lock in the main
+        # thread for good, and every command then hung the MQTT thread - the
+        # page timed out and the RGA went stale (13 October 2026).
+        self._acq_lock = threading.RLock()     # guards _acq and _last_activity
         self._last_activity = time.monotonic()
         self._snapshot: dict[str, dict] = {}
         self._t0 = time.monotonic()
@@ -243,7 +247,7 @@ class RgaService(BaseService):
             self._publish_info()
 
     def _publish_info(self) -> None:
-        with self._lock:
+        with self._acq_lock:
             acq = self._acq_view()
         record = {"t": iso(utcnow()), "identity": self._identity,
                   "control": self._control, "acquisition": acq,
@@ -269,7 +273,7 @@ class RgaService(BaseService):
         `nextScan` hands each scan over once, in order; it is drained here
         until it has nothing new, so a fast recipe does not fall behind.
         """
-        with self._lock:
+        with self._acq_lock:
             acq = self._acq
             if acq is None or acq["state"] != "scanning":
                 return
@@ -290,7 +294,7 @@ class RgaService(BaseService):
                              f"scan {d.get('scannum')} has {len(values)} points, "
                              f"the recipe {expected}; not recorded")
                 return
-            with self._lock:
+            with self._acq_lock:
                 acq["scans"].append({"scannum": d.get("scannum"), "t": iso(utcnow()),
                                      "system_status": d.get("systemStatus"),
                                      "values": values})
@@ -301,7 +305,7 @@ class RgaService(BaseService):
                 return
 
     def _finish(self, acq: dict, state: str, error: str | None = None) -> None:
-        with self._lock:
+        with self._acq_lock:
             acq["state"] = state
             if error:
                 acq["error"] = error
@@ -314,7 +318,7 @@ class RgaService(BaseService):
         self._publish_info()
 
     def _publish_scan(self, acq: dict) -> None:
-        with self._lock:
+        with self._acq_lock:
             last = acq["scans"][-1]
             payload = {"t": last["t"], "recipe": acq["recipe"]["name"],
                        "scannum": last["scannum"], "done": len(acq["scans"]),
@@ -327,7 +331,7 @@ class RgaService(BaseService):
     def _release_if_idle(self, control: dict) -> None:
         if not control.get("amInControl"):
             return
-        with self._lock:
+        with self._acq_lock:
             busy = self._acq is not None and self._acq["state"] == "scanning"
             idle = time.monotonic() - self._last_activity
         if busy or idle < self._release_idle_s:
@@ -387,7 +391,7 @@ class RgaService(BaseService):
             return
         if not self._usable(ACK_RGA_CONTROL, action, actor):
             return
-        with self._lock:
+        with self._acq_lock:
             self._last_activity = time.monotonic()
             scanning = self._acq is not None and self._acq["state"] == "scanning"
         try:
@@ -421,7 +425,7 @@ class RgaService(BaseService):
             return
         if not self._usable(ACK_RGA_SCAN, action, actor):
             return
-        with self._lock:
+        with self._acq_lock:
             self._last_activity = time.monotonic()
             acq = self._acq
 
@@ -463,7 +467,7 @@ class RgaService(BaseService):
                "points": sum(rga_file.points(c) for c in recipe["channels"]),
                "masses": rga_file.masses(recipe), "t_start": iso(utcnow()),
                "mono_start": time.monotonic(), "state": "scanning", "by": actor}
-        with self._lock:
+        with self._acq_lock:
             self._acq = new
         self.interval_s = self._scan_interval
         self._publish_info()
@@ -474,7 +478,7 @@ class RgaService(BaseService):
     def _handle_save(self, topic: str, payload: str) -> None:
         d, actor = self._parse(payload)
         action = "rga_save"
-        with self._lock:
+        with self._acq_lock:
             self._last_activity = time.monotonic()
             acq = self._acq
         if acq is None or not acq["scans"]:
@@ -495,7 +499,7 @@ class RgaService(BaseService):
                       f"could not read the analyser's settings: {exc}")
             return
         tags = [t for t in (str(x).strip() for x in (d.get("tags") or [])) if t]
-        with self._lock:
+        with self._acq_lock:
             scans = [dict(s) for s in acq["scans"]]
         record = {
             "format": rga_file.FORMAT,
@@ -516,7 +520,7 @@ class RgaService(BaseService):
         except (OSError, ValueError) as exc:
             self._ack(ACK_RGA_SAVE, False, action, actor, f"could not write the file: {exc}")
             return
-        with self._lock:
+        with self._acq_lock:
             acq["saved"] = record["file"]
         self.bus.publish_raw(TOPIC_RGA_SAVED, json.dumps(
             rga_file.summary(record, self._summary_masses)))
@@ -584,7 +588,7 @@ class RgaService(BaseService):
         """
         if self._client is not None:
             try:
-                with self._lock:
+                with self._acq_lock:
                     scanning = self._acq is not None and self._acq["state"] == "scanning"
                 if scanning:
                     self._client.stop_scan()
