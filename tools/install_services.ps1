@@ -65,6 +65,7 @@ $Services = [ordered]@{
     "lakeshore" = @("-m", "xams_sc.devices", "lakeshore")
     "ups"       = @("-m", "xams_sc.devices", "ups")
     "turbo"     = @("-m", "xams_sc.devices", "turbo")
+    "rga"       = @("-m", "xams_sc.devices", "rga")
     "derived"   = @("-m", "xams_sc.devices", "derived")
     "alarms"    = @("-m", "xams_sc.alarms")
     "webui"     = @("-m", "xams_sc.api")

@@ -783,6 +783,27 @@ def create_app(broker: str = "127.0.0.1", port: int = 1883, *,
             by_device.setdefault(view.device, []).append(view)
         return page(request, "status.html", by_device=by_device)
 
+    @app.get("/rga", response_class=HTMLResponse)
+    def rga(request: Request):
+        """The residual gas analyser: what it is, who holds it, what it is doing.
+
+        STATUS ONLY (step 1 of docs/drivers/rga.md): nothing on this page
+        reaches the analyser. Scans, Save and the emission button arrive in
+        later steps.
+        """
+        from ..devices.prismapro import SYSTEM_STATUS_BITS, decode_system_status
+
+        channels = {c.name: c for c in state.channels("rga")}
+        status = channels.get("rga_status")
+        bits = None
+        if status is not None and status.healthy and status.value is not None:
+            word = int(status.value)
+            bits = {"word": f"0x{word:08X}",
+                    "on": [name for name, on in decode_system_status(word).items() if on],
+                    "named": len(SYSTEM_STATUS_BITS)}
+        return page(request, "rga.html", info=state.rga_info(),
+                    channels=channels, bits=bits)
+
     @app.get("/hv", response_class=HTMLResponse)
     def high_voltage(request: Request):
         """The CAEN supplies: what each channel reads, and what the board is

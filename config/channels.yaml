@@ -540,6 +540,30 @@ channels:
      description: "turbo rotation speed (Pfeiffer 309 ActualSpd); needs DCU service line or display on 309"}
 
   # ------------------------------------------------------------------
+  # Residual gas analyser, Pfeiffer PrismaPro (devices.yaml `rga`,
+  # docs/drivers/rga.md). STATUS ONLY: what the analyser is doing, never its
+  # spectra - those are saved by hand, one file per measurement, and never
+  # become channels. `phys` is the MMSP target read (or, for `emission` and
+  # `control`, what is derived from one).
+  #
+  # Not on the P&ID: the analyser's state has no place on a piping drawing.
+  # ------------------------------------------------------------------
+  - {name: rga_emission, device: rga, phys: emission, kind: status, unit: bool, on_pid: false,
+     description: "RGA emission on (systemStatus bit 31 or 30)"}
+  - {name: rga_control, device: rga, phys: control, kind: status, unit: code, on_pid: false,
+     description: "RGA control: 0 nobody, 1 this system, 2 another client (PV MassSpec, web UI); who on the RGA page"}
+  - {name: rga_status, device: rga, phys: status/systemStatus, kind: status, unit: bits, on_pid: false,
+     description: "RGA systemStatus word (bits in docs/drivers/rga.md)"}
+  - {name: rga_hw_errors, device: rga, phys: status/hardwareErrors, kind: status, unit: bits, on_pid: false,
+     description: "RGA hardware errors, 0 = none"}
+  - {name: rga_hw_warnings, device: rga, phys: status/hardwareWarnings, kind: status, unit: bits, on_pid: false,
+     description: "RGA hardware warnings, 0 = none"}
+  - {name: rga_tp_trips, device: rga, phys: sensorIonSource/tpTripCount, kind: status, unit: code, on_pid: false,
+     description: "RGA lifetime count of emission switched off by its own over-pressure trip"}
+  - {name: rga_box_temp, device: rga, phys: diagnosticData/internalBoxTemperature, kind: temperature, unit: C, on_pid: false,
+     description: "RGA electronics box internal temperature"}
+
+  # ------------------------------------------------------------------
   # Derived (§7.5). Not read from hardware; computed by devices/derived.py.
   # ------------------------------------------------------------------
   - {name: fm101_total, device: derived, phys: "integrate:fm101", kind: voltage, unit: g,

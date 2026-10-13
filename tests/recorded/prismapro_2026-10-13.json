@@ -1,0 +1,110 @@
+{
+ "/mmsp/sensorInfo/name/get": {
+  "data": "RGA PrismaPro A 200 47504651",
+  "name": "got",
+  "origin": "/mmsp/sensorInfo/name"
+ },
+ "/mmsp/electronicsInfo/serialNumber/get": {
+  "data": "47504651",
+  "name": "got",
+  "origin": "/mmsp/electronicsInfo/serialNumber"
+ },
+ "/mmsp/electronicsInfo/controlFWVersion/get": {
+  "data": "1.09.05.202306010915",
+  "name": "got",
+  "origin": "/mmsp/electronicsInfo/controlFWVersion"
+ },
+ "/mmsp/electronicsInfo/massRange/get": {
+  "data": 200,
+  "name": "got",
+  "origin": "/mmsp/electronicsInfo/massRange"
+ },
+ "/mmsp/sensorInfo/filaments/get": {
+  "data": [
+   {
+    "@id": 0,
+    "filamentType": 1
+   },
+   {
+    "@id": 1,
+    "filamentType": 1
+   },
+   {
+    "@id": 2,
+    "filamentType": 1
+   }
+  ],
+  "name": "got",
+  "origin": "/mmsp/sensorInfo/filaments"
+ },
+ "/mmsp/sensorInfo/detectorType/get": {
+  "data": "CDEM",
+  "name": "got",
+  "origin": "/mmsp/sensorInfo/detectorType"
+ },
+ "/mmsp/sensorIonSource/tPunits/get": {
+  "data": 0,
+  "name": "got",
+  "origin": "/mmsp/sensorIonSource/tPunits"
+ },
+ "/mmsp/status/systemStatus/get": {
+  "data": 17841040,
+  "name": "got",
+  "origin": "/mmsp/status/systemStatus"
+ },
+ "/mmsp/status/hardwareErrors/get": {
+  "data": 0,
+  "name": "got",
+  "origin": "/mmsp/status/hardwareErrors"
+ },
+ "/mmsp/status/hardwareWarnings/get": {
+  "data": 0,
+  "name": "got",
+  "origin": "/mmsp/status/hardwareWarnings"
+ },
+ "/mmsp/sensorIonSource/tpTripCount/get": {
+  "data": 32,
+  "name": "got",
+  "origin": "/mmsp/sensorIonSource/tpTripCount"
+ },
+ "/mmsp/diagnosticData/internalBoxTemperature/get": {
+  "data": 35.749,
+  "name": "got",
+  "origin": "/mmsp/diagnosticData/internalBoxTemperature"
+ },
+ "/mmsp/communication/controlInfo/get": {
+  "data": {
+   "sessionId": null,
+   "ipAddress": "null",
+   "controlled": false,
+   "locked": false,
+   "amInControl": false,
+   "canRequestControl": true,
+   "canTakeControl": true,
+   "canForceControl": true,
+   "secondsSinceLastRequest": null,
+   "secondsSinceLastControlRequest": null,
+   "secondsSinceLastDataRequest": null,
+   "clientName": null
+  },
+  "name": "got",
+  "origin": "/mmsp/communication/controlInfo"
+ },
+ "/mmsp/sensorInfo/serialNumberString/get": {
+  "data": {},
+  "conditions": [
+   {
+    "command": "serialNumberString",
+    "code": 1,
+    "id": "msgIdInvalid",
+    "level": "error.hardware",
+    "message": "Message ID invalid",
+    "details": {
+     "unrecognizedParameter": ".serialNumberString"
+    }
+   }
+  ],
+  "name": "error",
+  "origin": "/mmsp/sensorInfo/serialNumberString"
+ }
+}

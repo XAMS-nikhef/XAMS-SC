@@ -9,6 +9,7 @@ at different moments, and they are now separate pages:
     /hv       Control: everything that writes to an instrument
     /system   System health: is the software all right
     /status   the channel list
+    /rga      the residual gas analyser, status only for now
     /alarms   the alarm chain
     /logs     the service logs
 
@@ -30,7 +31,7 @@ INSTRUMENT_WRITES = ('action="/hv/apply"', 'action="/hv/output"',
                      'action="/lakeshore/setpoint"', 'action="/lakeshore/range"',
                      'action="/flow/reset"')
 
-PAGES = ("/", "/status", "/hv", "/hv/defaults", "/system", "/alarms", "/logs")
+PAGES = ("/", "/status", "/hv", "/hv/defaults", "/rga", "/system", "/alarms", "/logs")
 
 
 class TestEveryPageAnswers:

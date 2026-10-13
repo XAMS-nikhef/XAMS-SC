@@ -119,3 +119,24 @@ turbo:
   max_age_s: 5
   # Startup listens this long for a valid reply before refusing to start.
   identify_s: 5
+
+rga:
+  # Pfeiffer PrismaPro QMG 250 residual gas analyser on the pre-volume, on the
+  # lab Ethernet. HTTP/JSON ("MMSP") on port 80. Read-only discovery
+  # 2026-10-13, see docs/drivers/rga.md.
+  #
+  # STEP 1: STATUS ONLY. The service takes no control and writes nothing; its
+  # HTTP client has no write method.
+  #
+  # Identity: the analyser must report exactly this name and serial, or the
+  # service refuses to start. The address alone identifies nothing.
+  model: "Pfeiffer PrismaPro QMG 250 A 200 (CDEM, yttria-iridium filaments)"
+  host: 192.16.192.86     # prismapro-xams-rga.nikhef.nl
+  port: 80
+  match: {name: "RGA PrismaPro A 200 47504651", serial: "47504651"}
+  connection: ethernet-http
+  timeout_s: 5
+  # One request per target, over one kept-alive connection; a cycle takes
+  # about 0.7 s. Status every 5 s is plenty, and the device drops requests
+  # that come too fast.
+  read_interval_s: 5

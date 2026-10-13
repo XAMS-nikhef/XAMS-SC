@@ -364,6 +364,9 @@ every command you send">set</button>
   <a href="/status" class="{{ 'on' if page == '/status' }}">Channels</a>
   <a href="/hv"     class="{{ 'on' if page in ('/hv', '/hv/defaults') }}">Control</a>
   <a href="/system" class="{{ 'on' if page == '/system' }}">System health</a>
+  {# The RGA has a page of its own: it is one instrument with its own
+     questions (who holds it, is emission on), not a row among the channels. #}
+  <a href="/rga"    class="{{ 'on' if page == '/rga' }}">RGA</a>
   {# Alarms sits after High voltage and before Logs: it is about the plant,
      not about the machine. The recipient list lives on it rather than in this
      bar, because it is a setting touched a few times a year and the bar is
