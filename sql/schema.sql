@@ -91,6 +91,10 @@ CREATE TABLE IF NOT EXISTS rga_saves (
     total_pressure_mbar double precision
 );
 
+-- Which detector took it: Faraday or EM (added 13 October 2026). EM values
+-- in rga_summary are relative while the analyser's EM gain is uncalibrated.
+ALTER TABLE rga_saves ADD COLUMN IF NOT EXISTS detector text;
+
 CREATE TABLE IF NOT EXISTS rga_summary (
     t          timestamptz      NOT NULL,      -- the Save, as in rga_saves
     file       text             NOT NULL,

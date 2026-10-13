@@ -129,6 +129,16 @@ def load_into_grafana(args) -> int:
         f"{args.user}:{args.password}".encode()).decode()
 
     files = sorted(DASHBOARD_DIR.glob("*.json"))
+    if args.uid:
+        # Only the ones asked for: loading overwrites, and a dashboard edited
+        # in the UI but not yet --saved would silently lose that edit.
+        files = [f for f in files
+                 if json.loads(f.read_text(encoding="utf-8")).get("uid") in args.uid]
+        missing = set(args.uid) - {json.loads(f.read_text(encoding="utf-8"))["uid"]
+                                   for f in files}
+        if missing:
+            print(f"No archived dashboard with uid {sorted(missing)}.", file=sys.stderr)
+            return 1
     if not files:
         print(f"No dashboards in {DASHBOARD_DIR.relative_to(ROOT)}.")
         return 1

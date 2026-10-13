@@ -590,7 +590,7 @@ Pick a recipe and press **Start**:
 |---|---|---|
 | `survey` | 1–200 amu, 10 points/amu | 3 scans of ~32 s |
 | `air_leak` | 2, 4, 14, 18, 28, 32, 40, 44 amu | 10 scans of ~2 s |
-| `xenon` | 120–136 amu (Xe⁺ isotopes from 124) | 5 scans of ~5 s |
+| `xenon` | 120–140 amu (Xe⁺ isotopes 124–136) | 5 scans of ~6 s |
 | `quick` | 1–50 amu, 4 points/amu | 2 scans of ~6 s |
 
 Recipes are in `config/rga_recipes.yaml`; a new one is a few lines there and a

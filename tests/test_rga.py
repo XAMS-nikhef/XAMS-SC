@@ -517,6 +517,7 @@ class TestScanAndSave:
         assert {p["mass"] for p in summary["peaks"]} == {2, 4, 18, 28, 32, 40, 44}
         save_row, peak_rows = rga_writer.rows(summary)
         assert save_row[1] == ack["file"] and len(peak_rows) == 7
+        assert save_row[-1] == "Faraday"           # the detector column
 
     def test_the_same_acquisition_is_not_saved_twice(self, monkeypatch, tmp_path, analyser):
         service = running(monkeypatch, tmp_path, analyser)
@@ -1200,3 +1201,35 @@ class TestEmAcquisition:
         assert scan["scale"] == pytest.approx(-1 / 1234.57)
         assert scan["gain_calibrated"] is False
         assert service.bus.last_json("xams/rga/info")["em"]["gain_calibrated"] is False
+
+
+class TestGrafanaDashboard:
+    """grafana/dashboards-archive/rga.json, loaded with
+    tools/save_dashboard.py --load xams-rga."""
+    PATH = pathlib.Path(__file__).resolve().parents[1] / "grafana" / "dashboards-archive" / "rga.json"
+
+    def dashboard(self):
+        return json.loads(self.PATH.read_text(encoding="utf-8"))
+
+    def test_it_is_the_xams_rga_dashboard_on_the_xams_datasource(self):
+        d = self.dashboard()
+        assert d["uid"] == "xams-rga" and "xams" in d["tags"]
+        for panel in d["panels"]:
+            assert panel["datasource"]["uid"] == "xams-postgres"
+            (t,) = panel["targets"]
+            assert t["rawQuery"] and t["editorMode"] == "code"
+
+    def test_the_rga_panels_read_only_the_summary_tables(self):
+        for panel in self.dashboard()["panels"]:
+            sql = panel["targets"][0]["rawSql"]
+            assert "rga_" in sql or "FROM meas WHERE channel = 'p105'" in sql
+            assert not any(w in sql.upper() for w in ("INSERT", "UPDATE ", "DELETE", "DROP"))
+
+    def test_the_detector_defaults_to_faraday(self):
+        """EM values are relative while the gain is uncalibrated."""
+        (det,) = [v for v in self.dashboard()["templating"]["list"] if v["name"] == "detector"]
+        assert det["current"]["value"] == ["Faraday"]
+
+    def test_131_is_not_a_summary_mass_on_it(self):
+        """131 is mostly C3F5+ from PTFE: xenon is read from 129 and 132."""
+        assert "WHEN 131" not in json.dumps(self.dashboard())

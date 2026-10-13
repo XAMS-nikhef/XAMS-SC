@@ -21,8 +21,9 @@ from ..model import parse_iso
 log = logging.getLogger(__name__)
 
 INSERT_SAVE = """
-INSERT INTO rga_saves (t, file, recipe, tags, comment, total_pressure_mbar)
-VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (file) DO NOTHING
+INSERT INTO rga_saves (t, file, recipe, tags, comment, total_pressure_mbar, detector)
+VALUES (%s, %s, %s, %s, %s, %s, %s)
+ON CONFLICT (file) DO UPDATE SET detector = EXCLUDED.detector
 """
 INSERT_PEAK = """
 INSERT INTO rga_summary (t, file, mass, current_a, pp_mbar)
@@ -35,7 +36,7 @@ def rows(summary: dict):
     t = parse_iso(summary["t"])
     save = (t, summary["file"], summary["recipe"],
             ",".join(summary.get("tags") or []), summary.get("comment") or "",
-            summary.get("total_pressure_mbar"))
+            summary.get("total_pressure_mbar"), summary.get("detector") or "Faraday")
     peaks = [(t, summary["file"], p["mass"], p["current_a"], p.get("pp_mbar"))
              for p in summary.get("peaks") or []]
     return save, peaks

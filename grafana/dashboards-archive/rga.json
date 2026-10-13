@@ -1,0 +1,471 @@
+{
+  "uid": "xams-rga",
+  "title": "RGA",
+  "tags": [
+    "xams",
+    "rga"
+  ],
+  "id": null,
+  "description": "The RGA summary: one point per Save, from rga_saves and rga_summary (docs/drivers/rga.md, 'Data'). Spectra are never in the database - each Save is a JSON file in data/rga/. Edit in the UI, then tools/save_dashboard.py --save.",
+  "editable": true,
+  "graphTooltip": 1,
+  "schemaVersion": 39,
+  "timezone": "",
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "refresh": "",
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "mass",
+        "label": "mass (amu)",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "xams-postgres"
+        },
+        "definition": "SELECT DISTINCT mass FROM rga_summary ORDER BY 1",
+        "query": {
+          "query": "SELECT DISTINCT mass FROM rga_summary ORDER BY 1",
+          "refId": "rga-mass"
+        },
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "sort": 3,
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        }
+      },
+      {
+        "name": "recipe",
+        "label": "recipe",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "xams-postgres"
+        },
+        "definition": "SELECT DISTINCT recipe FROM rga_saves ORDER BY 1",
+        "query": {
+          "query": "SELECT DISTINCT recipe FROM rga_saves ORDER BY 1",
+          "refId": "rga-recipe"
+        },
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "sort": 1,
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        }
+      },
+      {
+        "name": "detector",
+        "label": "detector",
+        "type": "custom",
+        "query": "Faraday,EM",
+        "multi": true,
+        "includeAll": false,
+        "current": {
+          "selected": true,
+          "text": [
+            "Faraday"
+          ],
+          "value": [
+            "Faraday"
+          ]
+        },
+        "options": [
+          {
+            "selected": true,
+            "text": "Faraday",
+            "value": "Faraday"
+          },
+          {
+            "selected": false,
+            "text": "EM",
+            "value": "EM"
+          }
+        ]
+      }
+    ]
+  },
+  "panels": [
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "xams-postgres"
+      },
+      "description": "One point per Save (rga_summary, the mean of its scans): the largest value from 0.25 amu below to 0.45 amu above each mass. Not a continuous measurement - lines only join Saves. 131 is not shown: it is mostly C3F5+ from PTFE; read xenon from 129 and 132. EM values are relative while the EM gain is uncalibrated (devices.yaml em_gain_calibrated), so the detector selector defaults to Faraday.",
+      "id": 1,
+      "title": "Ion current per mass",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 11,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "amp",
+          "decimals": 2,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "showPoints": "always",
+            "pointSize": 6,
+            "spanNulls": true,
+            "fillOpacity": 0,
+            "axisLabel": "ion current",
+            "scaleDistribution": {
+              "type": "log",
+              "log": 10
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "xams-postgres"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT s.t AS time, CASE s.mass WHEN 2 THEN '02 H2' WHEN 4 THEN '04 He' WHEN 18 THEN '18 H2O' WHEN 28 THEN '28 N2/CO' WHEN 32 THEN '32 O2' WHEN 40 THEN '40 Ar' WHEN 44 THEN '44 CO2' WHEN 69 THEN '69 CF3 (PTFE)' WHEN 129 THEN '129 Xe' WHEN 132 THEN '132 Xe' ELSE s.mass::text END AS metric, s.current_a AS value\nFROM rga_summary s JOIN rga_saves v ON v.file = s.file\nWHERE $__timeFilter(s.t) AND s.mass IN ($mass) AND v.recipe IN ($recipe) AND coalesce(v.detector, 'Faraday') IN ($detector) AND s.current_a > 0\nORDER BY 1",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "xams-postgres"
+      },
+      "description": "current / the analyser's ppSensitivityFactor, converted to mbar: N2-equivalent, not corrected per gas. A trend, not a calibration.",
+      "id": 2,
+      "title": "Partial pressure (device sensitivity)",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 11
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "sci",
+          "decimals": 2,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "showPoints": "always",
+            "pointSize": 6,
+            "spanNulls": true,
+            "fillOpacity": 0,
+            "axisLabel": "mbar",
+            "scaleDistribution": {
+              "type": "log",
+              "log": 10
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "xams-postgres"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT s.t AS time, CASE s.mass WHEN 2 THEN '02 H2' WHEN 4 THEN '04 He' WHEN 18 THEN '18 H2O' WHEN 28 THEN '28 N2/CO' WHEN 32 THEN '32 O2' WHEN 40 THEN '40 Ar' WHEN 44 THEN '44 CO2' WHEN 69 THEN '69 CF3 (PTFE)' WHEN 129 THEN '129 Xe' WHEN 132 THEN '132 Xe' ELSE s.mass::text END AS metric, s.pp_mbar AS value\nFROM rga_summary s JOIN rga_saves v ON v.file = s.file\nWHERE $__timeFilter(s.t) AND s.mass IN ($mass) AND v.recipe IN ($recipe) AND coalesce(v.detector, 'Faraday') IN ($detector) AND s.pp_mbar > 0\nORDER BY 1",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "xams-postgres"
+      },
+      "description": "Per Save, each mass over N2/CO at 28. For an air leak O2/N2 (32/28) is about 0.2-0.3 and Ar/N2 (40/28) about 0.01; a 28 with little 32 and 40 is CO or outgassing rather than air.",
+      "id": 3,
+      "title": "Ratios to m/z 28 (leak check)",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 11
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "none",
+          "decimals": 2,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "showPoints": "always",
+            "pointSize": 6,
+            "spanNulls": true,
+            "fillOpacity": 0,
+            "axisLabel": "ratio",
+            "scaleDistribution": {
+              "type": "log",
+              "log": 10
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "xams-postgres"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT a.t AS time,\n  CASE a.mass WHEN 18 THEN 'H2O/N2 (18/28)' WHEN 32 THEN 'O2/N2 (32/28)' WHEN 40 THEN 'Ar/N2 (40/28)' WHEN 44 THEN 'CO2/N2 (44/28)' WHEN 69 THEN 'CF3/N2 (69/28)' END AS metric,\n  a.current_a / b.current_a AS value\nFROM rga_summary a\nJOIN rga_summary b ON b.file = a.file AND b.mass = 28\nJOIN rga_saves v ON v.file = a.file\nWHERE $__timeFilter(a.t) AND a.mass IN (18, 32, 40, 44, 69) AND v.recipe IN ($recipe) AND coalesce(v.detector, 'Faraday') IN ($detector)\n  AND a.current_a > 0 AND b.current_a > 0\nORDER BY 1",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "xams-postgres"
+      },
+      "description": "The slow-control pressure the RGA guards on: emission below 4e-4 mbar, EM below 4e-5 mbar.",
+      "id": 4,
+      "title": "p105 (guard gauge)",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 20
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "sci",
+          "decimals": 2,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "showPoints": "never",
+            "pointSize": 6,
+            "spanNulls": true,
+            "fillOpacity": 0,
+            "axisLabel": "mbar",
+            "scaleDistribution": {
+              "type": "log",
+              "log": 10
+            },
+            "thresholdsStyle": {
+              "mode": "line+area"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 4e-05
+              },
+              {
+                "color": "red",
+                "value": 0.0004
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": false,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "xams-postgres"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(t, $__interval), 'p105' AS metric, avg(value) AS value\nFROM meas WHERE channel = 'p105' AND quality = 'ok' AND $__timeFilter(t)\nGROUP BY 1, 2 ORDER BY 1",
+          "refId": "A"
+        }
+      ],
+      "interval": "10s"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "xams-postgres"
+      },
+      "id": 5,
+      "title": "Saved measurements",
+      "type": "table",
+      "description": "Every Save in the time range. The file is in data/rga/YYYY/ on the SC PC and downloadable from the RGA page; read it with xams_sc.rga_file.load_rga.",
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 27
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          },
+          "unit": "none"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/^I\\(/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "amp"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "displayName": "saved",
+            "desc": true
+          }
+        ]
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "xams-postgres"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT v.t AS saved, v.recipe, coalesce(v.detector, 'Faraday') AS detector, v.tags, v.comment,\n  max(s.current_a) FILTER (WHERE s.mass = 18) AS \"I(18) H2O\",\n  max(s.current_a) FILTER (WHERE s.mass = 28) AS \"I(28) N2/CO\",\n  max(s.current_a) FILTER (WHERE s.mass = 40) AS \"I(40) Ar\",\n  max(s.current_a) FILTER (WHERE s.mass = 69) AS \"I(69) CF3\",\n  max(s.current_a) FILTER (WHERE s.mass = 132) AS \"I(132) Xe\",\n  v.file\nFROM rga_saves v LEFT JOIN rga_summary s ON s.file = v.file\nWHERE $__timeFilter(v.t) AND v.recipe IN ($recipe) AND coalesce(v.detector, 'Faraday') IN ($detector)\nGROUP BY v.t, v.file, v.recipe, v.detector, v.tags, v.comment\nORDER BY v.t DESC",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

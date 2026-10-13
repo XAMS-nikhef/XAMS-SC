@@ -180,6 +180,7 @@ def summary(record: dict, summary_masses: list[float]) -> dict:
             "recipe": recipe["name"], "tags": record.get("tags") or [],
             "comment": record.get("comment") or "",
             "total_pressure_mbar": device.get("total_pressure_mbar"),
+            "detector": record.get("detector") or "Faraday",
             "peaks": rows}
 
 
