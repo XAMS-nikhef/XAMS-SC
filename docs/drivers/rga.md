@@ -1,0 +1,205 @@
+# Residual gas analyser (PrismaPro) — planned
+
+!!! warning "Planned, not built"
+    This page is the implementation plan. Nothing of it is in the code yet.
+    Only the read-only discovery (step 0) has been done, on 13 October 2026.
+
+Pfeiffer PrismaPro QMG 250 on the pre-volume, on the lab Ethernet. Used
+occasionally, until now with Pfeiffer's PV MassSpec. The plan is an RGA
+service in this system and an RGA page in the web UI, for **occasional,
+on-demand** measurements: few scans, saved by hand, no continuous RGA data in
+the archive or the database.
+
+It is the third instrument this system writes to, after the Lake Shore and
+the CAEN supplies. That is a design change and goes into
+[DESIGN.md](../DESIGN.md) when the first write is built.
+
+---
+
+## The device
+
+Read on 13 October 2026 from the slow-control PC, with GETs only: no control
+taken, nothing set.
+
+| | |
+|---|---|
+| Address | `192.16.192.86` = `prismapro-xams-rga.nikhef.nl`, port 80. Reachable from the slow-control PC, not from the Nikhef office network |
+| Name | `RGA PrismaPro A 200 47504651`, sensor serial 47504864, mass range **200 amu** |
+| Firmware | control `1.9.5.202306010915` (≥ 1.9.0: the control/lock procedure below applies), monitor `1.05.00` |
+| Filaments | three entries, all type 1 = **yttria-coated iridium** (more tolerant of air than tungsten); filament 1 selected |
+| Filament hours | `emisOnTime` 2 330 444 s ≈ 650 h on filaments 0 and 1; 20 919 s on filament 2 |
+| Detector | CDEM; `emOnTime` 409 |
+| Ion source | emission 2000 µA (level `Lo`), electron energy 70 V, ion energy 8000, optimisation `Linearity` |
+| Sensitivity | `ppSensitivityFactor` 7.93 × 10⁻⁴ A/Torr |
+| Pressure units | `tPunits` = 0 = **Torr** |
+| Own over-pressure trip | `tpThresholdCurrent` 5 × 10⁻⁷ A, `tpTresholdCount` 1; `tpTripCount` **32** (emission switched off by the device itself 32 times in its life) |
+| State | emission, RF and EM off; no interlock; hardware errors and warnings 0; filaments not open; nobody in control |
+| `systemStatus` | `0x01103B90`: bits 4, 7, 8, 9 (baseline correction on), 11, 12 (peak position correction on), 13, 20, 24 |
+| `ionSourceAnomaly` | `0x40000000` (bit 30) — meaning to look up |
+| Error log | 1163 entries in its life, none current |
+| Session timeout | `sessionTimeout` 60 s |
+
+**Every group can be read without control.** The full state of all groups
+was read with GETs on `/mmsp/<group>/get.api` without taking control,
+including targets the API reference marks `readmode: locked`
+(`measurement/totalPressure` returns 0 with emission off, not −1 as the
+reference says). Writes are what need control. `/mmsp/diagnostics` returns
+nothing.
+
+**There is no machine-readable schema on this firmware.** `/mmsp/get.api`
+returns current *values*, group by group (`@isStub` entries expand one level
+at a time), not the JSON schema the quick-start guide describes. The API
+reference PDF stays the description of types, ranges and write modes.
+
+**It drops rapid back-to-back connections.** A burst of separate `curl` calls
+mostly came back empty; one request a second, or one reused HTTP connection,
+worked every time. The client keeps one connection open.
+
+The vendor package, the full state snapshot of 13 October and the API
+reference live in the workspace, `reference/PrismaPro/`, not in this
+repository.
+
+---
+
+## The API, in short
+
+Plain HTTP GET on port 80, JSON back. `/mmsp/<group>/<target>/get`, or
+`/set?<value>`; several fields at once with `/mmsp/<group>/set?a=1&b=2`.
+
+**Errors arrive as HTTP 200** with a JSON event whose `name` is `error` and a
+`conditions` list (`id` e.g. `msgIdInvalid`). The client checks `name`, never
+only the HTTP status.
+
+**One controller at a time** (firmware ≥ 1.9.0):
+
+1. `communication/controlInfo/get` — check nobody (PV MassSpec, the device's
+   own web page) is in control.
+2. `communication/clientName/set?<name>`, `communication/control/set?force`,
+   `communication/controlLock/set?Session`.
+3. Release: `controlLock/set?Unlocked`, then `control/set?release`.
+
+Control falls back to "everybody" after a few minutes without requests, so
+the service keeps it alive while it holds it. `force` takes control away from
+PV MassSpec, so it is used only when an operator chooses it.
+
+**A scan is a list of channels.** Each channel has a `channelMode`: `Sweep`
+(start and stop mass, points per amu, dwell in ms), `Single` (one mass), or a
+housekeeping value (`Timestamp`, `TotalPressure`, `SystemStatus`,
+`EmissionCurrent`, …). `scanSetup/set?startChannel=..&stopChannel=..&scanCount=..`
+then `scanStart=1`. Points per sweep = 1 + (stop − start) × ppamu; scan time ≈
+points × dwell.
+
+**Reading:** `measurement/nextScan/get` gives the next unread scan with
+`scannum`, `currentScan` and `systemStatus` — no scan is lost or read twice.
+`measurement/scans/-1/get` is the last complete scan.
+
+**Emission:** `generalControl/setEmission/set?On|Off`. On also starts the RF;
+it takes seconds. The sensor must be under vacuum, or the filament is
+destroyed.
+
+---
+
+## Where it goes in this system
+
+The same pattern as every other driver: its own process, publishing to MQTT;
+the UI and storage are subscribers.
+
+```
+PrismaPro ◄─HTTP─► rga service (own process) ──MQTT──► web UI: RGA page
+                        │   ▲                    ├──► audit (emission, control)
+                        │   └── p105 ◄───────────┘
+                        └──► data/rga/YYYY/*.json  (on Save) ──► rga_summary ──► Grafana
+```
+
+| File | What | Knows MQTT? |
+|---|---|---|
+| `devices/prismapro.py` | HTTP client (one connection, error events, timeouts, whitelist of writable targets), control take/keep/release, status decoding, recipe → `scanSetup` | no — usable from a notebook |
+| `devices/rga.py` | the service: identity check, state on the bus, commands from the bus, live scans to the page, Save, emission watchdog, p105 interlock | yes |
+| `rga_file.py` | JSON writer, `load_rga(path)`, summary extraction — shared by the service, the rebuild tool and analysis | no |
+| `sinks/` | `rga_summary` rows on "saved" events; rebuild from `data/rga/` | — |
+| `api/templates/rga.html` | the RGA page | — |
+| `config/devices.yaml` `rga:` | address, client name, summary masses, p105 limit | — |
+| `config/rga_recipes.yaml` | survey 0–200 amu; air leak 2, 4, 14, 18, 28, 32, 40, 44; xenon 124–136 | — |
+
+**Identity:** `sensorInfo/name` must be `RGA PrismaPro A 200 47504651` and
+`electronicsInfo/serialNumber` `47504651`, or the service refuses to start —
+the HTTP equivalent of `*IDN?`.
+
+---
+
+## Data
+
+| What | Where | When |
+|---|---|---|
+| Live spectra | memory and the browser only | while scanning |
+| Full measurement | `data/rga/YYYY/YYYY-MM-DDTHHMMSS_<recipe>.json` | only on **Save** |
+| Summary: total pressure and ~10 masses | PostgreSQL `rga_summary` → its own Grafana dashboard | only on Save |
+| Emission on/off, control taken/released | audit, as for HV | on the action |
+| State: emission, control, errors | MQTT `rga/...`, not archived by the jsonl and pg writers | on change |
+
+- The RGA files are a separate set from `data/raw/*.jsonl`. No spectra in the
+  jsonl stream, none in PostgreSQL.
+- The files are the truth: `rga_summary` is rebuilt from `data/rga/` the same
+  way the readings tables are rebuilt from the archive.
+- **One file per Save**, plain JSON: UTC time; recipe name and full
+  definition; device serial, firmware, filament, emission current, electron
+  energy, EM state and voltage, units, sensitivity factor; a snapshot of the
+  slow-control values at that moment (p105, pmain, temperatures); comment and
+  tags (`background`, `before-fill`, `after-bake`, `leak-check`); the file name
+  of the background scan it refers to. Data: N raw scans (default 5–10, at most
+  20) and their mean, total pressure and `systemStatus` per scan. Values as
+  the device gives them, not rounded; no mass axis (start, stop and ppamu
+  define it).
+- **Size:** about 14 bytes a point plus 2–3 kB of metadata. 0–200 amu at 10
+  points/amu is 2001 points, about 30 kB a scan; a Save of 10 scans about
+  300 kB.
+- **Background:** an emission-off (or baseline) scan saved as its own file at
+  the start of a session.
+- **Trend mode** (selected masses and total pressure about once a minute, into
+  `rga_summary`) only later, only started by hand, with an automatic stop.
+
+---
+
+## Safety
+
+- **Emission only from the page's emission button**, with a confirmation.
+  Never from a recipe, never from an alarm. The only automatic action is *off*.
+- **p105 interlock: the RGA may be operated only with p105 below
+  5 × 10⁻⁴ mbar** (= 3.75 × 10⁻⁴ Torr). The service subscribes to p105:
+    - before emission on: refuse if p105 is missing, stale or at or above the limit;
+    - during operation: p105 at or above the limit → emission off at once;
+    - p105 stale: a short grace period, then emission off;
+    - every interlock action audited.
+- **Caveat:** p105 is measured at the turbo; the RGA is on the pre-volume with
+  valves in between. With a valve closed, p105 can be low while the RGA sees
+  more. The device's own over-pressure trip stays the last line of defence;
+  this system reads its settings and never changes them.
+- **Writable targets are a whitelist** in `prismapro.py`: control and lock,
+  `clientName`, `scanSetup`, `setEmission`. Never `sensorIonSource`,
+  `shutdown`, firmware, network, IO, `userDB`, degas or EM settings. Every write
+  is checked, read back, acknowledged on the bus and audited, as for `VSET`.
+- **Never `force` without an operator choosing it**, and control is released
+  when the service is idle, so PV MassSpec can still be used.
+- **Own process.** The HTTP calls are slow (seconds for emission); nothing in
+  them can block another service.
+
+---
+
+## Steps
+
+0. **Discovery, read-only** — done 13 October 2026 (this page).
+1. **Client and status:** `prismapro.py`, `rga.py` publishing state; the RGA
+   page shows status only. Tests on recorded responses. No writes.
+2. **Scans with emission off:** take and release control, recipes, live
+   spectrum, Save → JSON and `rga_summary`, the rebuild tool. The whole data
+   path without risk to the filament.
+3. **Emission:** button with confirmation, pre-checks, watchdog, audit. First
+   real test together in the lab.
+4. **Grafana:** its own dashboard on `rga_summary`; a file browser on the page.
+5. **p105 interlock:** `p105` (cDAQ `9207/ai7`, mbar) is already a channel,
+   so this follows step 3 directly.
+6. **Later:** trend mode; analysis helpers.
+
+**Open:** Torr or mbar (proposal: convert to mbar in the service and leave the
+device setting alone, since changing it is a write that PV MassSpec also sees); the summary masses (proposal: 2, 4,
+18, 28, 32, 40, 44, 129, 132).
