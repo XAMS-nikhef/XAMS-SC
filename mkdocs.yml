@@ -115,6 +115,7 @@ nav:
       - Lake Shore 335: drivers/lakeshore.md
       - UPS: drivers/ups.md
       - Turbo pump (HiPace 80): drivers/turbo.md
+      - RGA (PrismaPro, planned): drivers/rga.md
       - Derived channels: drivers/derived.md
       - Writing a new driver: drivers/writing.md
   - Decisions:
