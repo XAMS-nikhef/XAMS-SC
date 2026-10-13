@@ -1,6 +1,6 @@
 # Grafana
 
-<http://127.0.0.1:3000> → **XAMS Overview**. History and plots; everything live
+<http://127.0.0.1:3000> → **XAMS Overview** (and **RGA**, [below](#the-rga-dashboard)). History and plots; everything live
 is on [the web interface](../operating/webui.md) instead.
 
 Grafana reads PostgreSQL and nothing else. **It is a view, never a source:** a
@@ -47,6 +47,38 @@ Default range is the last 15 minutes, refreshing every 10 s, in
 as a separate parameter; the sign is applied once, in software, before storage
 (§7.2). So the cathode plots negative and the anode positive, which is what you
 want on one graph.
+
+---
+
+## The RGA dashboard
+
+**RGA** (uid `xams-rga`): the residual gas analyser's summary, **one point per
+Save** — not a continuous measurement; the lines only join Saves. It reads
+`rga_saves` and `rga_summary` (and `p105` from `meas`); the spectra themselves
+are files in `data/rga/`, never in the database
+([RGA driver, "Data"](../drivers/rga.md#data)).
+
+| Panel | What |
+|---|---|
+| Ion current per mass | the summary masses (2, 4, 18, 28, 32, 40, 44, 69, 129, 132), log axis, A |
+| Partial pressure | the same through the analyser's own sensitivity: N₂-equivalent mbar, a trend |
+| Ratios to m/z 28 | 18, 32, 40, 44, 69 over 28 — an air leak shows O₂/N₂ ≈ 0.2–0.3 and Ar/N₂ ≈ 0.01 |
+| p105 | the guard gauge, with the EM (4 × 10⁻⁵) and emission (4 × 10⁻⁴) limits shaded |
+| Saved measurements | every Save in the range, with a few currents and the file name |
+
+Selectors: **mass**, **recipe**, **detector**. Detector defaults to *Faraday*:
+EM values are relative while the EM gain is uncalibrated, and putting them on
+one axis with Faraday values would mislead. 131 is left out on purpose — it is
+mostly C₃F₅⁺ from PTFE; read xenon from 129 and 132. Default range 30 days.
+
+Loading it into Grafana (once, and after editing the JSON by hand):
+
+```
+.venv\Scripts\python.exe tools\save_dashboard.py --load xams-rga --password <admin password>
+```
+
+`--load` with a uid loads only that dashboard; without one it loads (and
+overwrites) every archived dashboard.
 
 ---
 

@@ -140,7 +140,7 @@ back and stops a running scan. The service releases by itself after
 
 **Recipes** in `config/rga_recipes.yaml`: `survey` (1–200 amu, 10/amu,
 16 ms, 3 scans of ~32 s), `air_leak` (2, 4, 14, 18, 28, 32, 40, 44 at 256 ms,
-10 scans of ~2 s), `xenon` (120–136 amu, 5 scans of ~5 s), `quick` (the
+10 scans of ~2 s), `xenon` (120–140 amu since 13 October 2026, 5 scans of ~6 s), `quick` (the
 tested 1–50 amu set-up, 2 scans of ~6 s). Validated at startup
 (`rga_file.validate_recipe`): out-of-bounds is refused, never clipped.
 
@@ -427,7 +427,7 @@ PrismaPro ◄─HTTP─► rga service (own process) ──MQTT──► web UI:
 | `sinks/` | `rga_summary` rows on "saved" events; rebuild from `data/rga/` | — |
 | `api/templates/rga.html` | the RGA page | — |
 | `config/devices.yaml` `rga:` | address, client name, summary masses, p105 limit | — |
-| `config/rga_recipes.yaml` | survey 0–200 amu; air leak 2, 4, 14, 18, 28, 32, 40, 44; xenon 120–136 | — |
+| `config/rga_recipes.yaml` | survey 0–200 amu; air leak 2, 4, 14, 18, 28, 32, 40, 44; xenon 120–140 | — |
 
 **Identity:** `sensorInfo/name` must be `RGA PrismaPro A 200 47504651` and
 `electronicsInfo/serialNumber` `47504651`, or the service refuses to start —
@@ -521,8 +521,9 @@ the HTTP equivalent of `*IDN?`.
 4. **Electron multiplier** (CDEM, ~100-1000× the Faraday cup's signal) —
    built 13 October 2026, not yet switched on (see
    [What is built](#what-is-built-step-4-13-october-2026)). Was step 5.
-5. **Grafana:** its own dashboard on `rga_summary`. (The file list on the
-   page is done.)
+5. **Grafana** — built 13 October 2026: dashboard **RGA** (`xams-rga`,
+   [Grafana](../grafana/index.md#the-rga-dashboard)); `rga_saves.detector`
+   added so Faraday and EM Saves can be told apart.
 6. **Later:** trend mode; analysis helpers; EM gain calibration from here
    (now in PV MassSpec).
 

@@ -36,10 +36,10 @@ recipes:
       - {mode: single, mass: 44, dwell: 256}
 
   xenon:
-    description: "Xe+ isotopes, 120-136 amu (lowest isotope 124), ~5 s per scan"
+    description: "Xe+ isotopes, 120-140 amu (124 to 136), ~6 s per scan"
     scans: 5
     channels:
-      - {mode: sweep, start: 120, stop: 136, ppamu: 10, dwell: 32}
+      - {mode: sweep, start: 120, stop: 140, ppamu: 10, dwell: 32}
 
   quick:
     description: "1-50 amu, ~6 s per scan - the setup tested on 13 October 2026"
