@@ -124,7 +124,7 @@ worse than a gap (§1, principle 4).
 ## Commands and acknowledgements
 
 Every topic that makes an instrument *do* something has an acknowledgement
-beside it. There are nine, and the list is short on purpose (§10, §10a).
+beside it. There are ten, and the list is short on purpose (§10, §10a).
 
 | Command | Acknowledgement | What it does |
 |---|---|---|
@@ -137,6 +137,7 @@ beside it. There are nine, and the list is short on purpose (§10, §10a).
 | `xams/cmd/rga/control` | `xams/ack/rga/control` | take or release the RGA (`force` only when an operator chose it) |
 | `xams/cmd/rga/scan` | `xams/ack/rga/scan` | start a recipe, or stop the scan |
 | `xams/cmd/rga/save` | `xams/ack/rga/save` | write the last acquisition to its file |
+| `xams/cmd/rga/emission` | `xams/ack/rga/emission` | RGA emission On or Off; On only past the p105 guard |
 
 **The rules that apply to all of them:**
 

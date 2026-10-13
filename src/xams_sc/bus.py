@@ -114,15 +114,19 @@ STATUS_NOTIFY = "xams/status/notify"
 # (emission, status words, trips) are ordinary channels.
 TOPIC_RGA_INFO = "xams/rga/info"
 
-# The RGA commands (step 2). Taking and releasing control, starting and
-# stopping a scan, saving the last acquisition. None of them reaches emission,
-# the electron multiplier or the ion source; the client cannot write those.
+# The RGA commands. Taking and releasing control, starting and stopping a
+# scan, saving the last acquisition, and emission On/Off. None reaches the
+# electron multiplier or the ion source; the client cannot write those.
 TOPIC_RGA_CONTROL = "xams/cmd/rga/control"
 ACK_RGA_CONTROL = "xams/ack/rga/control"
 TOPIC_RGA_SCAN = "xams/cmd/rga/scan"
 ACK_RGA_SCAN = "xams/ack/rga/scan"
 TOPIC_RGA_SAVE = "xams/cmd/rga/save"
 ACK_RGA_SAVE = "xams/ack/rga/save"
+# Emission On or Off (step 3). On only past the p105 guard and the
+# analyser's own state; the service's only automatic action is Off.
+TOPIC_RGA_EMISSION = "xams/cmd/rga/emission"
+ACK_RGA_EMISSION = "xams/ack/rga/emission"
 
 # The latest scan of the running acquisition, RETAINED, for the live plot.
 # Outside xams/meas: a spectrum is never archived from the bus - only a Save

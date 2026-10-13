@@ -5,15 +5,38 @@
 {% set ctl = info.control %}
 {% set acq = info.acquisition %}
 {% set recipes = info.recipes or {} %}
+{% set guard = info.guard or {} %}
+{% set emis = info.emission or {} %}
 {% set em = channels.get('rga_emission') %}
 {% set cc = channels.get('rga_control') %}
 {% set ours = ctl and ctl.us %}
 {% set scanning = acq and acq.state == 'scanning' %}
+{% set emission_on = em and em.healthy and em.value %}
+
+<style>
+  /* Two rows. Top: what the analyser is, and its state, side by side. Below:
+     every control in one panel, to the left of the spectrum it acts on. Both
+     fold to one column when the window is too narrow. */
+  .rga-pair { display:grid; gap:1.2rem; align-items:stretch;
+              grid-template-columns:repeat(2, minmax(0,1fr)); margin-bottom:1.2rem; }
+  .rga-main { display:grid; gap:1.2rem; align-items:start;
+              grid-template-columns:minmax(300px, 1fr) minmax(0, 2.2fr); }
+  @media (max-width:900px) {
+    .rga-pair, .rga-main { grid-template-columns:minmax(0,1fr); }
+  }
+  .rga-pair > .card, .rga-main > .card { margin:0; }
+  .rga-controls h3 { margin:1rem 0 .4rem 0; font-size:.95em; }
+  .rga-controls h3:first-of-type { margin-top:.2rem; }
+  .rga-controls form { margin:.3rem 0; }
+  .rga-controls input[type=text], .rga-controls select { width:100%; box-sizing:border-box; }
+  .rga-controls .stack { display:flex; flex-direction:column; gap:.4rem; }
+</style>
 
 {% if ok %}<div class="flash good" style="margin:0 0 1rem 0">{{ ok }}</div>{% endif %}
 {% if error %}<div class="flash bad" style="margin:0 0 1rem 0">
   <strong>Refused — nothing was changed.</strong> {{ error }}</div>{% endif %}
 
+<div class="rga-pair">
 <div class="card">
   <h2>Residual gas analyser</h2>
   {% if not ident %}
@@ -26,7 +49,7 @@
     {% if ident.firmware %}<tr><th>Firmware</th><td>{{ ident.firmware }}</td></tr>{% endif %}
     {% if ident.mass_range_amu %}<tr><th>Mass range</th><td>{{ ident.mass_range_amu }} amu</td></tr>{% endif %}
     {% if ident.filaments %}<tr><th>Filaments</th><td>{{ ident.filaments|join(', ') }}</td></tr>{% endif %}
-    {% if ident.detector %}<tr><th>Detector</th><td>{{ ident.detector }}</td></tr>{% endif %}
+    {% if ident.detector %}<tr><th>Detector</th><td>{{ ident.detector }} <span class="dim">(not used: Faraday cup only)</span></td></tr>{% endif %}
     {% if ident.tp_units %}<tr><th>Device pressure unit</th><td>{{ ident.tp_units }}</td></tr>{% endif %}
   </table>
   {% endif %}
@@ -39,7 +62,7 @@
       <td>{% if em and em.healthy %}
             {% if em.value %}<span class="bad">ON</span>{% else %}<span class="good">off</span>{% endif %}
           {% else %}—{% endif %}
-          <span class="dim">— not switched from this page</span></td></tr>
+          {% if emis.get('interlock') %}<span class="bad"> — interlock active</span>{% endif %}</td></tr>
     <tr><th>Control</th>
       <td>{% if cc and cc.healthy %}
             {% if cc.value == 0 %}nobody — free
@@ -49,6 +72,11 @@
               <span class="dim">— {{ ctl.client or 'no name' }}{% if ctl.ip %} from {{ ctl.ip }}{% endif %}{% if ctl.locked %}, locked{% endif %}</span>
             {% endif %}
           {% else %}—{% endif %}</td></tr>
+    <tr><th>{{ guard.get('channel') or 'p105' }} (guard)</th>
+      <td>{% set gv = guard.get('value') %}{% if gv is number %}{{ '%.2e'|format(gv) }} mbar{% else %}—{% endif %}
+          <span class="{{ 'good' if guard.get('ok') else 'bad' }}">
+            {{ '<' if guard.get('ok') else '' }} limit {{ '%.0e'|format(guard.get('limit_mbar') or 5e-4) }} mbar</span>
+          {% set ga = guard.get('age_s') %}{% if ga is number %}<span class="dim">({{ '%.0f'|format(ga) }} s ago)</span>{% endif %}</td></tr>
     {% for name, label in [('rga_hw_errors', 'Hardware errors'), ('rga_hw_warnings', 'Hardware warnings')] %}
     {% set c = channels.get(name) %}
     <tr><th>{{ label }}</th>
@@ -67,87 +95,102 @@
             <span class="dim">{{ bits.on|join(', ') or 'no named bit set' }}</span>
           {% else %}—{% endif %}</td></tr>
   </table>
+  {% if emis.get('note') %}<div class="flash bad" style="margin-top:.6rem">Emission {{ emis.get('note') }}</div>{% endif %}
+</div>
+</div>
 
-  <div style="display:flex;gap:.8rem;flex-wrap:wrap;margin-top:.8rem">
-    {% if not ours %}
-    <form method="post" action="/rga/control" class="reset-form"
-          onsubmit="return (!this.force.checked || confirm('Another client holds the RGA. Take it from them? A measurement of theirs may be cut off.'));">
-      <input type="hidden" name="action" value="take">
-      <button type="submit">Take control</button>
-      <label class="dim" style="align-self:center">
-        <input type="checkbox" name="force" value="yes"> take it anyway, from another client</label>
-    </form>
-    {% else %}
-    <form method="post" action="/rga/control" class="reset-form"
-          onsubmit="return confirm('Give the RGA back{{ ' and stop the running scan' if scanning }}?');">
-      <input type="hidden" name="action" value="release">
-      <button type="submit">Release control</button>
-    </form>
-    {% endif %}
+<div class="rga-main">
+<div class="card rga-controls">
+  <h2>Controls</h2>
+
+  <h3>Control</h3>
+  {% if not ours %}
+  <form method="post" action="/rga/control" class="stack"
+        onsubmit="return (!this.force.checked || confirm('Another client holds the RGA. Take it from them? A measurement of theirs may be cut off.'));">
+    <input type="hidden" name="action" value="take">
+    <button type="submit">Take control</button>
+    <label class="dim"><input type="checkbox" name="force" value="yes"> take it anyway, from another client</label>
+  </form>
+  {% else %}
+  <form method="post" action="/rga/control" class="stack"
+        onsubmit="return confirm('Give the RGA back{{ ' and switch emission off' if emission_on }}{{ ' and stop the running scan' if scanning }}?');">
+    <input type="hidden" name="action" value="release">
+    <button type="submit">Release control</button>
+  </form>
+  {% endif %}
+
+  <h3>Emission</h3>
+  {% if emission_on %}
+  <form method="post" action="/rga/emission" class="stack">
+    <input type="hidden" name="action" value="off">
+    <button type="submit" {{ 'disabled' if not ours }}>Emission OFF</button>
+  </form>
+  {% else %}
+  <form method="post" action="/rga/emission" class="stack"
+        onsubmit="return confirm('Switch the RGA emission ON? The filament must be under vacuum. {{ (guard.get('reason') or '')|replace("'", '') }}.');">
+    <input type="hidden" name="action" value="on">
+    <button type="submit" {{ 'disabled' if not ours or not guard.get('ok') }}>Emission ON</button>
+  </form>
+  {% endif %}
+  <div class="dim" style="font-size:.85em">
+    {% if not ours %}take control first.{% elif not guard.get('ok') and not emission_on %}<span class="bad">{{ guard.get('reason') }}</span>{% else %}{{ guard.get('reason') }}{% endif %}
   </div>
-  <div class="note">Control is given back by itself after a few minutes
-    without a scan, and when the service stops, so PV MassSpec is never locked
-    out by this page.</div>
+
+  <h3>Scan</h3>
+  {% if info.recipe_error %}<p class="bad">{{ info.recipe_error }}</p>{% endif %}
+  {% if not scanning %}
+  <form method="post" action="/rga/scan" class="stack">
+    <input type="hidden" name="action" value="start">
+    <select name="recipe" aria-label="recipe">
+      {% for name, r in recipes.items() %}
+      <option value="{{ name }}">{{ name }} — {{ r.scans }} × ~{{ r.seconds }} s</option>
+      {% endfor %}
+    </select>
+    <button type="submit" {{ 'disabled' if not ours or not recipes }}>Start</button>
+  </form>
+  {% if not emission_on %}<div class="dim" style="font-size:.85em">emission is off: a scan measures the background</div>{% endif %}
+  {% else %}
+  <form method="post" action="/rga/scan" class="stack"
+        onsubmit="return confirm('Stop the scan? The scans taken so far can still be saved.');">
+    <input type="hidden" name="action" value="stop">
+    <button type="submit">Stop</button>
+  </form>
+  {% endif %}
+
+  {% if acq and acq.done and not scanning and not acq.saved %}
+  <h3>Save</h3>
+  <form method="post" action="/rga/save" class="stack">
+    <input type="text" name="comment" placeholder="comment — what, where, valves">
+    <input type="text" name="tags" placeholder="tags, e.g. background, before-fill">
+    <input type="text" name="background" placeholder="background file (optional)">
+    <button type="submit">Save</button>
+  </form>
+  {% endif %}
+
+  <div class="note" style="margin-top:1rem">Control is given back by itself
+    after five minutes without a scan (not while emission is on), and emission
+    goes off after an hour without a scan or a command, when p105 reaches the
+    limit, on Release and when the service stops.</div>
 </div>
 
 <div class="card">
-  <h2>Scan</h2>
-  {% if info.recipe_error %}<p class="bad">{{ info.recipe_error }}</p>{% endif %}
-  <div style="display:flex;gap:.8rem;flex-wrap:wrap;align-items:center">
-    {% if not scanning %}
-    <form method="post" action="/rga/scan" class="reset-form">
-      <input type="hidden" name="action" value="start">
-      <select name="recipe" aria-label="recipe">
-        {% for name, r in recipes.items() %}
-        <option value="{{ name }}">{{ name }} — {{ r.scans }} × ~{{ r.seconds }} s{% if r.description %} ({{ r.description }}){% endif %}</option>
-        {% endfor %}
-      </select>
-      <button type="submit" {{ 'disabled' if not ours or not recipes }}>Start</button>
-    </form>
-    {% if not ours %}<span class="dim">take control first</span>{% endif %}
-    {% else %}
-    <form method="post" action="/rga/scan" class="reset-form"
-          onsubmit="return confirm('Stop the scan? The scans taken so far can still be saved.');">
-      <input type="hidden" name="action" value="stop">
-      <button type="submit">Stop</button>
-    </form>
-    {% endif %}
-    <span id="acq-status" class="dim">
-      {% if acq %}{{ acq.recipe }}: {{ acq.state }}, {{ acq.done }} of {{ acq.of }} scans{% if acq.saved %}, saved as {{ acq.saved }}{% endif %}{% if acq.error %} — {{ acq.error }}{% endif %}{% else %}no acquisition yet{% endif %}
-    </span>
+  <h2>Spectrum</h2>
+  <div id="acq-status" class="dim">
+    {% if acq %}{{ acq.recipe }}: {{ acq.state }}, {{ acq.done }} of {{ acq.of }} scans{% if acq.saved %}, saved as {{ acq.saved }}{% endif %}{% if acq.error %} — {{ acq.error }}{% endif %}{% else %}no acquisition yet{% endif %}
   </div>
-
-  <canvas id="spectrum" height="320" style="width:100%;margin-top:.8rem"
+  <canvas id="spectrum" height="360" style="width:100%;margin-top:.6rem"
           aria-label="live spectrum"></canvas>
-  <div class="dim" style="display:flex;gap:1rem;font-size:.85em">
+  <div class="dim" style="display:flex;gap:1rem;font-size:.85em;flex-wrap:wrap">
     <label><input type="checkbox" id="logy" checked> log scale (|current|)</label>
     <span id="plot-note"></span>
   </div>
-</div>
-
-{% if acq and acq.done and not scanning and not acq.saved %}
-<div class="card">
-  <h2>Save this acquisition</h2>
-  <form method="post" action="/rga/save" class="reset-form" style="flex-wrap:wrap;gap:.6rem">
-    <input type="text" name="comment" placeholder="comment — what, where, valves" style="min-width:22rem">
-    <input type="text" name="tags" placeholder="tags, e.g. background, before-fill" style="min-width:14rem">
-    <input type="text" name="background" placeholder="background file (optional)" style="min-width:14rem">
-    <button type="submit">Save</button>
-  </form>
-  <div class="note">One JSON file in <code>data/rga/</code> with every scan,
-    their mean and the analyser's settings; a summary of a few masses goes to
-    the database for Grafana. Nothing is saved unless you press Save.</div>
-</div>
-{% endif %}
-
-<div class="card">
-  <div class="note">
-    <strong>No emission control here.</strong> This page takes and gives back
-    control, runs recipes and saves results. It cannot switch emission, the
-    electron multiplier or the ion source: with emission off a scan measures
-    the detector's noise, which is a background. A stale value shows a dash,
-    never its last number.
+  <div class="note" style="margin-top:.8rem">
+    Faraday cup, ion current in ampere. With emission off a scan measures the
+    detector's noise (about 10⁻¹⁴ A): a background. Nothing is stored unless
+    you press Save; then one file in <code>data/rga/</code> and a summary of a
+    few masses for Grafana.
   </div>
+</div>
 </div>
 
 <script>
@@ -176,9 +219,9 @@
     let lo = Math.min(...all), hi = Math.max(...all);
     if (hi === lo) { hi += 1; lo -= 1; }
     const x0 = Math.min(...xs), x1 = Math.max(...xs);
-    const pad = 40, X = m => pad + (m - x0) / ((x1 - x0) || 1) * (w - pad - 10),
+    const pad = 46, X = m => pad + (m - x0) / ((x1 - x0) || 1) * (w - pad - 10),
           Y = v => h - 20 - (f(v) - lo) / (hi - lo) * (h - 30);
-    ctx.strokeStyle = css('--dim', '#888'); ctx.fillStyle = css('--dim', '#888');
+    ctx.fillStyle = css('--dim', '#888');
     ctx.font = '11px sans-serif';
     ctx.fillText(log ? `1e${hi.toFixed(1)} A` : `${hi.toExponential(1)} A`, 2, 12);
     ctx.fillText(log ? `1e${lo.toFixed(1)}` : lo.toExponential(1), 2, h - 22);
@@ -204,7 +247,12 @@
   window.addEventListener('resize', draw);
   poll();
   setInterval(poll, 2000);
-  {% if scanning %}setTimeout(() => location.reload(), 15000);{% endif %}
+  // The state (emission, control, p105) changes within seconds of a button
+  // press; reload to follow it - but never while somebody is typing.
+  setInterval(() => {
+    const a = document.activeElement;
+    if (!a || !['INPUT', 'SELECT', 'TEXTAREA'].includes(a.tagName)) location.reload();
+  }, 10000);
 })();
 </script>
 {% endblock %}

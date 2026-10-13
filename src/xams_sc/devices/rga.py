@@ -36,14 +36,16 @@ from __future__ import annotations
 import json
 import logging
 import math
+import queue
 import threading
 import time
 from datetime import datetime
 
 from .. import rga_file
-from ..bus import (ACK_RGA_CONTROL, ACK_RGA_SAVE, ACK_RGA_SCAN, TOPIC_AUDIT,
-                   TOPIC_MEAS, TOPIC_RGA_CONTROL, TOPIC_RGA_INFO, TOPIC_RGA_SAVE,
-                   TOPIC_RGA_SAVED, TOPIC_RGA_SCAN, TOPIC_RGA_SCANDATA)
+from ..bus import (ACK_RGA_CONTROL, ACK_RGA_EMISSION, ACK_RGA_SAVE, ACK_RGA_SCAN,
+                   TOPIC_AUDIT, TOPIC_MEAS, TOPIC_RGA_CONTROL, TOPIC_RGA_EMISSION,
+                   TOPIC_RGA_INFO, TOPIC_RGA_SAVE, TOPIC_RGA_SAVED, TOPIC_RGA_SCAN,
+                   TOPIC_RGA_SCANDATA)
 from ..config import CONFIG_DIR, ROOT, Config
 from ..model import Measurement, Quality, iso, utcnow
 from ..service import BaseService
@@ -56,6 +58,7 @@ log = logging.getLogger(__name__)
 CONTROL_NONE, CONTROL_US, CONTROL_OTHER = 0, 1, 2
 
 SCANNING_BIT = 1 << 1
+INTERLOCK_BIT = 1 << 27
 SUMMARY_MASSES = [2, 4, 18, 28, 32, 40, 44, 129, 132]
 
 
@@ -127,6 +130,25 @@ class RgaService(BaseService):
         self._last_activity = time.monotonic()
         self._snapshot: dict[str, dict] = {}
         self._t0 = time.monotonic()
+
+        # The p105 GUARD (docs/drivers/rga.md, "Safety"). A software guard on
+        # top of the analyser's own over-pressure trip, NOT an interlock in the
+        # sense of DESIGN.md section 10 rule 1. It refuses emission on, and
+        # switches emission off, on the slow-control pressure p105.
+        self._guard_channel = str(self._spec.get("guard_channel", "p105"))
+        self._guard_limit = float(self._spec.get("guard_limit_mbar", 5e-4))
+        self._guard_max_age = float(self._spec.get("guard_max_age_s", 30))
+        self._guard_grace = float(self._spec.get("guard_grace_s", 60))
+        self._guard_seen: float | None = None     # monotonic receipt of p105
+        self._emission_idle_off_s = float(self._spec.get("emission_idle_off_s", 3600))
+        self._status_word: int | None = None      # systemStatus, last read
+        self._hw_errors: int | None = None
+        self._emission_note: str | None = None    # why emission last went off by itself
+
+        # Commands run on a worker thread, never on the MQTT thread: an
+        # analyser call takes up to seconds, and the MQTT thread is the one
+        # that carries everything this service publishes (13 October 2026).
+        self._commands: queue.Queue = queue.Queue()
         self._load_recipes(int(self._spec.get("mass_range", 200)))
 
     def _load_recipes(self, mass_range: int) -> None:
@@ -211,15 +233,24 @@ class RgaService(BaseService):
         # One GET per target, not per channel. A failure of any one is a
         # failed read: the loop marks every channel bad and backs off.
         data = {}
-        for target in {READERS[ch.phys][0] for ch in self._channels}:
+        targets = {READERS[ch.phys][0] for ch in self._channels}
+        # The guard needs these whatever channels.yaml asks for.
+        targets |= {"status/systemStatus", "status/hardwareErrors",
+                    "communication/controlInfo"}
+        for target in targets:
             data[target] = self._client.get(target)
+        self._status_word = int(data["status/systemStatus"])
+        self._hw_errors = int(data["status/hardwareErrors"])
 
-        control = data.get("communication/controlInfo")
-        if control is not None:
-            self._note_control(control)
+        control = data["communication/controlInfo"] or {}
+        self._note_control(control)
 
         self._collect_scans()
-        self._release_if_idle(control or {})
+        self._watch_emission(control)
+        self._release_if_idle(control)
+        # Every cycle, not only on a change: the guard's p105 and its age are
+        # what the page shows beside the emission button.
+        self._publish_info()
 
         now = utcnow()
         out = []
@@ -254,7 +285,11 @@ class RgaService(BaseService):
                   "recipes": {n: {"description": r["description"], "scans": r["scans"],
                                   "seconds": round(rga_file.scan_seconds(r), 1)}
                               for n, r in self._recipes.items()},
-                  "recipe_error": self._recipe_error}
+                  "recipe_error": self._recipe_error,
+                  "emission": {"on": self.emission_is_on(),
+                               "interlock": bool((self._status_word or 0) & INTERLOCK_BIT),
+                               "note": self._emission_note},
+                  "guard": self.guard_view()}
         self.bus.publish_raw(TOPIC_RGA_INFO, json.dumps(record), retain=True)
 
     def _acq_view(self) -> dict | None:
@@ -331,6 +366,10 @@ class RgaService(BaseService):
     def _release_if_idle(self, control: dict) -> None:
         if not control.get("amInControl"):
             return
+        if self.emission_is_on():
+            # Keep control while emission is on: without it the guard could
+            # not switch emission off. Emission has its own idle limit.
+            return
         with self._acq_lock:
             busy = self._acq is not None and self._acq["state"] == "scanning"
             idle = time.monotonic() - self._last_activity
@@ -343,6 +382,76 @@ class RgaService(BaseService):
                         "released automatically after %.0f s idle" % idle, "rga service")
         except (OSError, MMSPError) as exc:
             log.warning("could not release RGA control: %s", exc)
+
+    # ---------------------------------------------------------- the guard
+
+    def emission_is_on(self) -> bool:
+        """The REAL emission state: systemStatus bit 31 or 30, as last read.
+        Not what was last asked for - the regulator takes seconds to follow."""
+        return self._status_word is not None and emission_on(self._status_word)
+
+    def guard_view(self) -> dict:
+        """p105 as the guard sees it: value, age, and whether emission may go on."""
+        snap = self._snapshot.get(self._guard_channel) or {}
+        age = (time.monotonic() - self._guard_seen) if self._guard_seen else None
+        ok, reason = self.guard_allows()
+        return {"channel": self._guard_channel, "value": snap.get("v"),
+                "unit": snap.get("u"), "quality": snap.get("q"),
+                "age_s": None if age is None else round(age, 1),
+                "limit_mbar": self._guard_limit, "ok": ok, "reason": reason}
+
+    def guard_allows(self) -> tuple[bool, str]:
+        """May emission be on, as far as p105 is concerned?"""
+        snap = self._snapshot.get(self._guard_channel)
+        name = self._guard_channel
+        if not snap or self._guard_seen is None:
+            return False, f"{name} has not been received; the guard cannot judge"
+        age = time.monotonic() - self._guard_seen
+        if age > self._guard_max_age:
+            return False, f"{name} is {age:.0f} s old (more than {self._guard_max_age:.0f} s)"
+        if snap.get("q") != "ok" or not isinstance(snap.get("v"), (int, float)):
+            return False, f"{name} quality is {snap.get('q')}"
+        if snap.get("u") not in (None, "mbar"):
+            return False, f"{name} is in {snap.get('u')}, the guard expects mbar"
+        if snap["v"] >= self._guard_limit:
+            return False, (f"{name} = {snap['v']:.2e} mbar, at or above the limit "
+                           f"{self._guard_limit:.1e} mbar")
+        return True, f"{name} = {snap['v']:.2e} mbar < {self._guard_limit:.1e} mbar"
+
+    def _watch_emission(self, control: dict) -> None:
+        """Switch emission off when it must not stay on. Only ever OFF.
+
+        Acts only while this system holds the analyser: without control it
+        cannot write, and emission switched on by PV MassSpec is PV MassSpec's
+        to look after (and the analyser's own trip's).
+        """
+        if not self.emission_is_on() or not control.get("amInControl"):
+            return
+        reason = None
+        ok, why = self.guard_allows()
+        age = (time.monotonic() - self._guard_seen) if self._guard_seen else None
+        snap = self._snapshot.get(self._guard_channel) or {}
+        if isinstance(snap.get("v"), (int, float)) and snap["v"] >= self._guard_limit:
+            reason = f"guard: {why}"                       # at once, no grace
+        elif not ok and (age is None or age > self._guard_max_age + self._guard_grace):
+            reason = f"guard: {why}, past the grace period"
+        else:
+            with self._acq_lock:
+                busy = self._acq is not None and self._acq["state"] == "scanning"
+                idle = time.monotonic() - self._last_activity
+            if not busy and idle > self._emission_idle_off_s:
+                reason = (f"no scan or command for {idle / 60:.0f} min "
+                          f"(limit {self._emission_idle_off_s / 60:.0f} min)")
+        if reason is None:
+            return
+        try:
+            self._client.set_emission(False)
+        except (OSError, MMSPError) as exc:
+            log.error("COULD NOT SWITCH RGA EMISSION OFF (%s): %s", reason, exc)
+            return
+        self._emission_note = f"switched off by the service at {iso(utcnow())}: {reason}"
+        log.warning("RGA emission switched OFF by the service: %s", reason)
+        self._audit("rga_emission_off", "rga", "On", "Off", "ok", reason, "rga service")
 
     # ---------------------------------------------------------- commands
 
@@ -403,8 +512,15 @@ class RgaService(BaseService):
                 if scanning:
                     self._client.stop_scan()
                     self._finish(self._acq, "stopped", "stopped: control released")
-                info = self._client.release_control()
                 detail = "released"
+                if self.emission_is_on():
+                    # Never leave emission on behind a released analyser:
+                    # nothing could switch it off then.
+                    self._client.set_emission(False)
+                    self._audit("rga_emission_off", "rga", "On", "Off", "ok",
+                                "switched off before releasing control", actor)
+                    detail = "released, emission switched off first"
+                info = self._client.release_control()
         except ControlRefused as exc:
             self._ack(ACK_RGA_CONTROL, False, action, actor,
                       f"{exc}; tick 'take it anyway' to take it from them")
@@ -529,6 +645,54 @@ class RgaService(BaseService):
         self._ack(ACK_RGA_SAVE, True, action, actor, f"saved as {record['file']}",
                   file=record["file"], new=record["file"])
 
+    def _handle_emission(self, topic: str, payload: str) -> None:
+        """Emission On or Off, from the page. On only past every check."""
+        d, actor = self._parse(payload)
+        what = str(d.get("action", "")).lower()
+        action = "rga_emission_" + (what or "unknown")
+        if what not in ("on", "off"):
+            self._ack(ACK_RGA_EMISSION, False, action, actor, "action must be on or off")
+            return
+        if not self._usable(ACK_RGA_EMISSION, action, actor):
+            return
+        if not (self._control or {}).get("us"):
+            self._ack(ACK_RGA_EMISSION, False, action, actor,
+                      "this system does not hold the analyser; take control first")
+            return
+        with self._acq_lock:
+            self._last_activity = time.monotonic()
+        if what == "on":
+            ok, why = self.guard_allows()
+            if not ok:
+                self._ack(ACK_RGA_EMISSION, False, action, actor, why)
+                return
+            if self._hw_errors:
+                self._ack(ACK_RGA_EMISSION, False, action, actor,
+                          f"the analyser reports hardware errors 0x{self._hw_errors:08X}")
+                return
+            if (self._status_word or 0) & INTERLOCK_BIT:
+                self._ack(ACK_RGA_EMISSION, False, action, actor,
+                          "the analyser's emission interlock is active")
+                return
+        old = "On" if self.emission_is_on() else "Off"
+        try:
+            asked = self._client.set_emission(what == "on")
+        except (OSError, MMSPError, PermissionError) as exc:
+            self._ack(ACK_RGA_EMISSION, False, action, actor, f"the analyser said: {exc}")
+            return
+        want = "On" if what == "on" else "Off"
+        if asked != want:
+            self._ack(ACK_RGA_EMISSION, False, action, actor,
+                      f"asked for {want}, the analyser reports {asked}", old=old, new=want)
+            return
+        self._emission_note = None
+        log.warning("RGA emission %s requested by %s%s", want, actor,
+                    f" ({self.guard_allows()[1]})" if want == "On" else "")
+        self._ack(ACK_RGA_EMISSION, True, action, actor,
+                  f"emission {want} requested; the analyser takes a few seconds to follow"
+                  + (f" ({self.guard_allows()[1]})" if want == "On" else ""),
+                  old=old, new=want)
+
     def _read_settings(self) -> dict:
         out = dict(self._identity or {})
         for key, target in SETTINGS.items():
@@ -546,18 +710,43 @@ class RgaService(BaseService):
             m = json.loads(payload)
         except ValueError:
             return
-        self._snapshot[topic.rsplit("/", 1)[-1]] = {
+        name = topic.rsplit("/", 1)[-1]
+        self._snapshot[name] = {
             "v": m.get("v"), "u": m.get("u"), "q": m.get("q"), "t": m.get("t")}
+        if name == self._guard_channel:
+            self._guard_seen = time.monotonic()
 
     # -------------------------------------------------------------- run
 
+    def _enqueue(self, handler):
+        """A bus callback that only queues: the MQTT thread never waits on
+        the analyser."""
+        return lambda topic, payload: self._commands.put((handler, topic, payload))
+
+    def _work(self) -> None:
+        while True:
+            item = self._commands.get()
+            if item is None:
+                return
+            handler, topic, payload = item
+            try:
+                handler(topic, payload)
+            except Exception:
+                log.exception("RGA command on %s raised", topic)
+
     def run(self) -> int:
-        self.bus.subscribe(TOPIC_RGA_CONTROL, self._handle_control)
-        self.bus.subscribe(TOPIC_RGA_SCAN, self._handle_scan)
-        self.bus.subscribe(TOPIC_RGA_SAVE, self._handle_save)
-        for ch in self._snapshot_channels:
+        self.bus.subscribe(TOPIC_RGA_CONTROL, self._enqueue(self._handle_control))
+        self.bus.subscribe(TOPIC_RGA_SCAN, self._enqueue(self._handle_scan))
+        self.bus.subscribe(TOPIC_RGA_SAVE, self._enqueue(self._handle_save))
+        self.bus.subscribe(TOPIC_RGA_EMISSION, self._enqueue(self._handle_emission))
+        for ch in dict.fromkeys(self._snapshot_channels + [self._guard_channel]):
             self.bus.subscribe(f"{TOPIC_MEAS}/{ch}", self._on_snapshot)
-        return super().run()
+        worker = threading.Thread(target=self._work, name="rga-commands", daemon=True)
+        worker.start()
+        try:
+            return super().run()
+        finally:
+            self._commands.put(None)
 
     def _read_simulated(self) -> list[Measurement]:
         now = utcnow()
@@ -581,10 +770,12 @@ class RgaService(BaseService):
             self._client = None
 
     def close(self) -> None:
-        """On shutdown: stop a running scan and give control back, then close.
+        """On shutdown: stop a running scan, switch emission off, give control
+        back, then close.
 
         A service that stops while holding the analyser would lock PV MassSpec
-        out for the device's own timeout - minutes, for nothing.
+        out for the device's own timeout - minutes, for nothing. Emission left
+        on with nobody watching p105 is worse, so it goes off first.
         """
         if self._client is not None:
             try:
@@ -594,6 +785,12 @@ class RgaService(BaseService):
                     self._client.stop_scan()
                 info = self._client.get("communication/controlInfo") or {}
                 if info.get("amInControl"):
+                    status = int(self._client.get("status/systemStatus"))
+                    if emission_on(status):
+                        self._client.set_emission(False)
+                        log.warning("RGA emission switched off on shutdown")
+                        self._audit("rga_emission_off", "rga", "On", "Off", "ok",
+                                    "switched off: service stopping", "rga service")
                     self._client.release_control()
                     log.info("RGA control released on shutdown")
             except (OSError, MMSPError) as exc:
