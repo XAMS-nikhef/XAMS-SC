@@ -107,6 +107,13 @@ TOPIC_NOTIFY = "xams/cmd/alarms/notify"
 ACK_NOTIFY = "xams/ack/alarms/notify"
 STATUS_NOTIFY = "xams/status/notify"
 
+# What the RGA is and who controls it (docs/drivers/rga.md): identity,
+# firmware, filaments, units and the controlling client, RETAINED for the RGA
+# page. Descriptive, not a measurement - it is outside xams/meas, so the
+# archive and the database never see it. The numbers that matter over time
+# (emission, status words, trips) are ordinary channels.
+TOPIC_RGA_INFO = "xams/rga/info"
+
 
 class Bus:
     """A thin wrapper over paho-mqtt with an outage buffer.

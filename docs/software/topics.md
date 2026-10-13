@@ -22,6 +22,7 @@ Source: [the design specification](../DESIGN.md) §3 and `src/xams_sc/bus.py`.
 | `xams/audit` | one record per write, JSON | no |
 | `xams/flow/period` | the closed flow period, JSON | no |
 | `xams/backup/status` | the nightly backup's last result | **yes** |
+| `xams/rga/info` | the RGA's identity and controlling client, JSON; for the RGA page, never archived ([RGA](../drivers/rga.md)) | **yes** |
 
 `<channel>` is a name from [`channels.yaml`](config.md). `<service>` is a
 service name — `cdaq`, `caen`, `lakeshore`, `ups`, `turbo`, `derived`, `sinks`,

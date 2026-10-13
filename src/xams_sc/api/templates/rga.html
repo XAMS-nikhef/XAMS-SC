@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}RGA{% endblock %}
+{% block content %}
+{% set ident = info.identity or {} %}
+{% set ctl = info.control %}
+
+<div class="card">
+  <h2>Residual gas analyser</h2>
+  {% if not ident %}
+  <p class="warn">No word from the RGA service yet. Is it running? See
+     <a href="/system">System health</a> and <a href="/logs?service=rga">its log</a>.</p>
+  {% else %}
+  <table>
+    <tr><th>Instrument</th><td>{{ ident.name }}{% if ident.simulated %} <span class="warn">(SIMULATED)</span>{% endif %}</td></tr>
+    {% if ident.host %}<tr><th>Address</th><td>{{ ident.host }}</td></tr>{% endif %}
+    {% if ident.firmware %}<tr><th>Firmware</th><td>{{ ident.firmware }}</td></tr>{% endif %}
+    {% if ident.mass_range_amu %}<tr><th>Mass range</th><td>{{ ident.mass_range_amu }} amu</td></tr>{% endif %}
+    {% if ident.filaments %}<tr><th>Filaments</th><td>{{ ident.filaments|join(', ') }}</td></tr>{% endif %}
+    {% if ident.detector %}<tr><th>Detector</th><td>{{ ident.detector }}</td></tr>{% endif %}
+    {% if ident.tp_units %}<tr><th>Device pressure unit</th><td>{{ ident.tp_units }}</td></tr>{% endif %}
+  </table>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>State</h2>
+  {% set em = channels.get('rga_emission') %}
+  {% set cc = channels.get('rga_control') %}
+  <table>
+    <tr><th>Emission</th>
+      <td>{% if em and em.healthy %}
+            {% if em.value %}<span class="bad">ON</span>{% else %}<span class="good">off</span>{% endif %}
+          {% else %}—{% endif %}</td></tr>
+    <tr><th>Control</th>
+      <td>{% if cc and cc.healthy %}
+            {% if cc.value == 0 %}nobody — free
+            {% elif cc.value == 1 %}<span class="good">this system</span>
+            {% else %}<span class="warn">another client</span>{% endif %}
+            {% if ctl and ctl.controlled %}
+              <span class="dim">— {{ ctl.client or 'no name' }}{% if ctl.ip %} from {{ ctl.ip }}{% endif %}{% if ctl.locked %}, locked{% endif %}</span>
+            {% endif %}
+          {% else %}—{% endif %}</td></tr>
+    {% for name, label in [('rga_hw_errors', 'Hardware errors'), ('rga_hw_warnings', 'Hardware warnings')] %}
+    {% set c = channels.get(name) %}
+    <tr><th>{{ label }}</th>
+      <td>{% if c and c.healthy %}
+            {% if c.value %}<span class="bad">0x{{ '%08X'|format(c.value|int) }}</span>{% else %}<span class="good">none</span>{% endif %}
+          {% else %}—{% endif %}</td></tr>
+    {% endfor %}
+    {% set t = channels.get('rga_tp_trips') %}
+    <tr><th>Over-pressure trips</th>
+      <td>{% if t and t.healthy %}{{ t.value|int }} <span class="dim">(the analyser's own lifetime count)</span>{% else %}—{% endif %}</td></tr>
+    {% set b = channels.get('rga_box_temp') %}
+    <tr><th>Electronics temperature</th>
+      <td>{% if b and b.healthy %}{{ b.formatted() }} °C{% else %}—{% endif %}</td></tr>
+    <tr><th>systemStatus</th>
+      <td>{% if bits %}<code>{{ bits.word }}</code>
+            <span class="dim">{{ bits.on|join(', ') or 'no named bit set' }}</span>
+          {% else %}—{% endif %}</td></tr>
+  </table>
+</div>
+
+<div class="card">
+  <div class="note">
+    <strong>Status only.</strong> Nothing on this page reaches the analyser:
+    the service reads its state every few seconds and takes no control, so
+    PV MassSpec can be used as before. Scans, Save and the emission button come
+    in later steps (manual: Drivers → RGA).
+    A stale value shows a dash, never its last number.
+  </div>
+</div>
+{% endblock %}

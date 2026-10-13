@@ -19,7 +19,8 @@ from dataclasses import dataclass
 
 from ..bus import (ACK_HV_CLEAR, ACK_HV_OUTPUT, ACK_HV_VSET, ACK_LS_RANGE, ACK_LS_SETPOINT,
                    ACK_NOTIFY, TOPIC_ALARM, TOPIC_BACKUP, TOPIC_FLOW_RESET,
-                   TOPIC_HV_TRIP, TOPIC_MEAS, TOPIC_RELOAD, TOPIC_STATUS,
+                   TOPIC_HV_TRIP, TOPIC_MEAS, TOPIC_RELOAD, TOPIC_RGA_INFO,
+                   TOPIC_STATUS,
                    AckInbox, Bus)
 from ..model import Measurement, Quality, ServiceState, parse_iso, utcnow
 
@@ -91,6 +92,8 @@ class SystemState:
         self._flow_ack: dict | None = None
         self._acks = AckInbox()
         self._backup: dict | None = None
+        # The RGA's identity and controlling client, retained by its service.
+        self._rga_info: dict | None = None
         self._limits: dict | None = None
         self._notify: dict | None = None
         # Latched HV trips, by hv_vset channel, from the CAEN service's
@@ -293,6 +296,18 @@ class SystemState:
         except ValueError:
             pass
 
+    def _on_rga_info(self, topic: str, payload: str) -> None:
+        try:
+            with self._lock:
+                self._rga_info = json.loads(payload)
+        except ValueError:
+            pass
+
+    def rga_info(self) -> dict:
+        """What the RGA is and who controls it, as its service last said."""
+        with self._lock:
+            return dict(self._rga_info) if self._rga_info else {}
+
     def backup_status(self, overdue_hours: float = 30.0) -> dict:
         """What the nightly backup last did (docs/operating/backup.md).
 
@@ -337,6 +352,7 @@ class SystemState:
 
     def start(self) -> None:
         self.bus.subscribe(TOPIC_BACKUP, self._on_backup)
+        self.bus.subscribe(TOPIC_RGA_INFO, self._on_rga_info)
         self.bus.subscribe("xams/ack/derived/flow_reset", self._on_flow_ack)
         # EVERY ack topic a command may use. `command()` waits for the reply
         # on one of these, so an unsubscribed topic makes every write time out
@@ -387,7 +403,8 @@ class SystemState:
         return [v for v in views if v is not None]
 
     def services(self) -> list[dict]:
-        known = ["cdaq", "caen", "lakeshore", "ups", "turbo", "derived", "alarms", "sinks"]
+        known = ["cdaq", "caen", "lakeshore", "ups", "turbo", "rga", "derived", "alarms",
+                 "sinks"]
         with self._lock:
             beats, states = dict(self._heartbeats), dict(self._states)
         out = []

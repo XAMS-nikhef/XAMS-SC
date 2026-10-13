@@ -35,6 +35,7 @@ from xams_sc.devices.caen import CaenService
 from xams_sc.devices.cdaq import CdaqService
 from xams_sc.devices.derived import DerivedService
 from xams_sc.devices.lakeshore import LakeShoreService
+from xams_sc.devices.rga import RgaService
 from xams_sc.devices.turbo import TurboService
 from xams_sc.devices.ups import UpsService
 from xams_sc.model import Quality
@@ -42,7 +43,7 @@ from xams_sc.model import Quality
 # Every service that reads channels. A new one belongs here; that is the
 # point of the file.
 SERVICES = [CdaqService, CaenService, LakeShoreService, UpsService,
-            TurboService, DerivedService]
+            TurboService, RgaService, DerivedService]
 
 
 def build(cls, config=None):

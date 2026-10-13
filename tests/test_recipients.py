@@ -511,7 +511,7 @@ def all_well(app, bus):
     # All seven, including `sinks` and `alarms`. They were absent here because
     # they used to publish no heartbeat, which is exactly what made the page
     # unable to show the archive or the notifier as broken.
-    for service in ("cdaq", "caen", "lakeshore", "ups", "turbo", "derived",
+    for service in ("cdaq", "caen", "lakeshore", "ups", "turbo", "rga", "derived",
                     "sinks", "alarms"):
         bus.deliver(
             f"xams/status/{service}/heartbeat", now)

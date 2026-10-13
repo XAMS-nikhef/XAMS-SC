@@ -20,6 +20,7 @@ SERVICES = {
     "lakeshore": ("xams_sc.devices.lakeshore", "LakeShoreService"),
     "ups": ("xams_sc.devices.ups", "UpsService"),
     "turbo": ("xams_sc.devices.turbo", "TurboService"),
+    "rga": ("xams_sc.devices.rga", "RgaService"),
     "derived": ("xams_sc.devices.derived", "DerivedService"),
 }
 

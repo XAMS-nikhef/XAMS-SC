@@ -1,8 +1,10 @@
 # Residual gas analyser (PrismaPro) — planned
 
-!!! warning "Planned, not built"
-    This page is the implementation plan. Nothing of it is in the code yet.
-    Only the read-only discovery (step 0) has been done, on 13 October 2026.
+!!! warning "Partly built: status only"
+    This page is the implementation plan and the record of what is built.
+    Step 0 (read-only discovery) and step 1 (status service and page) are
+    done, 13 October 2026. Nothing writes to the analyser yet. See
+    [Steps](#steps).
 
 Pfeiffer PrismaPro QMG 250 on the pre-volume, on the lab Ethernet. Used
 occasionally, until now with Pfeiffer's PV MassSpec. The plan is an RGA
@@ -61,6 +63,59 @@ repository.
 
 ---
 
+## What is built (step 1, 13 October 2026)
+
+**`devices/prismapro.py`** — the MMSP client. One kept-alive HTTP connection,
+a small gap between requests, one retry on a fresh connection, every reply
+checked by its `name` (an error event is an error even with HTTP 200, an
+empty reply is an error, not a `None`). **It has no write method.**
+Also `decode_system_status`, `emission_on`, and `read_identity`. No MQTT, so
+it works from a notebook:
+
+```python
+from xams_sc.devices.prismapro import MMSPClient, read_identity
+c = MMSPClient("192.16.192.86")          # reachable from the slow-control PC
+read_identity(c).as_dict()
+c.get("status/systemStatus")
+```
+
+**`devices/rga.py`** — `RgaService`, `python -m xams_sc.devices rga`. Refuses
+to start unless the analyser reports the `match.name` and `match.serial` from
+`devices.yaml`. Reads every `read_interval_s` (5 s): one GET per target, about
+0.7 s a cycle, so 6 requests every 5 s. Takes no control. Publishes:
+
+| Channel | From | Unit | |
+|---|---|---|---|
+| `rga_emission` | `status/systemStatus` bit 31 or 30 | bool | the real state, not the last request |
+| `rga_control` | `communication/controlInfo` | code | 0 nobody, 1 this system, 2 another client |
+| `rga_status` | `status/systemStatus` | bits | named on the page |
+| `rga_hw_errors` | `status/hardwareErrors` | bits | 0 = none |
+| `rga_hw_warnings` | `status/hardwareWarnings` | bits | 0 = none |
+| `rga_tp_trips` | `sensorIonSource/tpTripCount` | code | the device's own lifetime trip count; a rise means it switched emission off itself |
+| `rga_box_temp` | `diagnosticData/internalBoxTemperature` | C | electronics box |
+
+These are ordinary channels: archived, in PostgreSQL, available to alarms and
+Grafana - seven numbers every 10 s, never spectra (decided 13 October 2026).
+No alarm thresholds are set on them yet. The identity and **who** holds
+control (client name, address) go on the retained topic `xams/rga/info`,
+outside `xams/meas`, so they are not archived.
+
+**The RGA page** (`/rga`, in the navigation after System health): identity,
+emission, control and by whom, hardware errors and warnings, trips,
+electronics temperature, and the named `systemStatus` bits. No form on it.
+
+**Tests:** `tests/test_rga.py`, on replies recorded from the analyser on
+13 October (`tests/recorded/prismapro_2026-10-13.json`). Checked against the real
+analyser through the slow-control PC the same day: identity accepted, all
+seven channels read.
+
+**Deploying it** (not done; needs an OK): pull on the slow-control PC, then
+`.\tools\install_services.ps1 -Only rga` **in the same session**. Once the
+configuration has the `rga_*` channels, the badge says "CHANNEL(S) NOT OK" and
+System health "SERVICE NOT REPORTING" until the service runs.
+
+---
+
 ## The API, in short
 
 Plain HTTP GET on port 80, JSON back. `/mmsp/<group>/<target>/get`, or
@@ -113,7 +168,7 @@ PrismaPro ◄─HTTP─► rga service (own process) ──MQTT──► web UI:
 
 | File | What | Knows MQTT? |
 |---|---|---|
-| `devices/prismapro.py` | HTTP client (one connection, error events, timeouts, whitelist of writable targets), control take/keep/release, status decoding, recipe → `scanSetup` | no — usable from a notebook |
+| `devices/prismapro.py` | HTTP client (one connection, error events, timeouts; built, read-only), later: whitelist of writable targets, control take/keep/release, recipe → `scanSetup` | no — usable from a notebook |
 | `devices/rga.py` | the service: identity check, state on the bus, commands from the bus, live scans to the page, Save, emission watchdog, p105 interlock | yes |
 | `rga_file.py` | JSON writer, `load_rga(path)`, summary extraction — shared by the service, the rebuild tool and analysis | no |
 | `sinks/` | `rga_summary` rows on "saved" events; rebuild from `data/rga/` | — |
@@ -135,7 +190,8 @@ the HTTP equivalent of `*IDN?`.
 | Full measurement | `data/rga/YYYY/YYYY-MM-DDTHHMMSS_<recipe>.json` | only on **Save** |
 | Summary: total pressure and ~10 masses | PostgreSQL `rga_summary` → its own Grafana dashboard | only on Save |
 | Emission on/off, control taken/released | audit, as for HV | on the action |
-| State: emission, control, errors | MQTT `rga/...`, not archived by the jsonl and pg writers | on change |
+| State: emission, control, status words, trips, box temperature | seven ordinary channels (`rga_*`), archived like any channel | every 10 s |
+| Identity, who holds control | retained `xams/rga/info`, not archived | on change |
 
 - The RGA files are a separate set from `data/raw/*.jsonl`. No spectra in the
   jsonl stream, none in PostgreSQL.
@@ -188,8 +244,8 @@ the HTTP equivalent of `*IDN?`.
 ## Steps
 
 0. **Discovery, read-only** — done 13 October 2026 (this page).
-1. **Client and status:** `prismapro.py`, `rga.py` publishing state; the RGA
-   page shows status only. Tests on recorded responses. No writes.
+1. **Client and status** — built 13 October 2026, not yet deployed (see
+   [What is built](#what-is-built-step-1-13-october-2026)).
 2. **Scans with emission off:** take and release control, recipes, live
    spectrum, Save → JSON and `rga_summary`, the rebuild tool. The whole data
    path without risk to the filament.
