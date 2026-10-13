@@ -2,8 +2,8 @@
 
 !!! warning "Partly built: no emission control"
     This page is the implementation plan and the record of what is built.
-    Steps 0-2 are done (13 October 2026): status, control, scans and Save.
-    Step 2 is not yet deployed. Nothing here can switch emission. See
+    Steps 0-2 are done and deployed (13 October 2026): status, control,
+    scans and Save. Nothing here can switch emission. See
     [Steps](#steps).
 
 Pfeiffer PrismaPro QMG 250 on the pre-volume, on the lab Ethernet. Used
@@ -177,9 +177,13 @@ through the slow-control PC, emission off): take → `quick` → 2 scans in
 14.5 s → Save (12.6 kB file) → release; nobody in control afterwards.
 Full test suite 1029 passed.
 
-**Deploying it** (needs an OK): pull on the slow-control PC, apply
-`sql/schema.sql` (new tables), restart `XAMS-sinks`, `XAMS-rga` and
-`XAMS-webui`.
+**Deployed** 13 October 2026 (`0a51a16`, with the lock fix of #14):
+`sql/schema.sql` applied (`rga_saves`, `rga_summary`, owned by `xams`),
+`XAMS-sinks`, `XAMS-rga` and `XAMS-webui` restarted. First run from the page:
+take → `quick` → 2 scans → Save → release in 21 s; file
+`data/rga/2026/2026-10-13T150521_quick.json` (13.4 kB), one `rga_saves` row
+and seven `rga_summary` rows (background, emission off: 0.6-1.4 × 10⁻¹⁴ A),
+four audit records.
 
 ---
 
@@ -313,7 +317,7 @@ the HTTP equivalent of `*IDN?`.
 0. **Discovery, read-only** — done 13 October 2026 (this page).
 1. **Client and status** — built and deployed 13 October 2026 (see
    [What is built](#what-is-built-step-1-13-october-2026)).
-2. **Control, scans, Save** — built 13 October 2026, not yet deployed (see
+2. **Control, scans, Save** — built and deployed 13 October 2026 (see
    [What is built](#what-is-built-step-2-13-october-2026)).
 3. **Emission:** button with confirmation, pre-checks, watchdog, audit. First
    real test together in the lab.
