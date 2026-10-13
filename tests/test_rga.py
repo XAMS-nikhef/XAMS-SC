@@ -237,6 +237,13 @@ class TestPage:
         assert "location.reload" not in body
         assert "rga-controls" in body and "DOMParser" in body
 
+    def test_a_pressed_button_greys_the_controls_until_the_answer(self, client):
+        """13 October 2026: actions take seconds, and a button still live in
+        that time invited a second click."""
+        body = client.get("/rga").text
+        assert "addEventListener('submit'" in body and "working…" in body
+        assert "if (busy) return;" in body
+
     def test_the_page_switches_the_em_but_sets_nothing_of_it(self, client):
         """Step 4: EM On/Off yes; its voltage and gain are not on the page."""
         body = client.get("/rga").text.lower()

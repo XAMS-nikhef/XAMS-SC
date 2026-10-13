@@ -61,6 +61,10 @@
   .rga-controls button:disabled { color:var(--dim); cursor:not-allowed; opacity:.6; }
   .rga-controls button.on:hover:not(:disabled) { border-color:var(--bad); color:var(--bad); }
   .rga-controls button.off:hover:not(:disabled) { border-color:var(--good); color:var(--good); }
+  /* While a command is on its way: every control greyed, the pressed one
+     says so. Set by the script below, cleared by the page that comes back. */
+  .rga-controls.busy button { cursor:progress; }
+  .rga-controls button.working { color:var(--warn); border-color:var(--warn); opacity:1; }
   .rga-controls label.dim { font-size:.85em; }
   #spectrum { display:block; width:100%; height:380px; margin-top:.6rem; cursor:crosshair; }
   .rga-files td { vertical-align:top; }
@@ -144,7 +148,8 @@
 </div>
 
 <div class="rga-main">
-<div class="card rga-controls" id="rga-controls">
+<div class="card rga-controls" id="rga-controls"
+     data-pending="{{ 'yes' if emis.get('pending') or emi.get('pending') else '' }}">
   <h2>Controls</h2>
   <div class="body">
 
@@ -184,7 +189,11 @@
     <form method="post" action="/rga/emission"
           onsubmit="return confirm('Switch the RGA emission on? The filament must be under vacuum. {{ (guard.get('reason') or '')|replace("'", '') }}.');">
       <input type="hidden" name="action" value="on">
+      {% if emis.get('pending') %}
+      <button type="button" class="working" disabled>Emission starting…</button>
+      {% else %}
       <button type="submit" class="on" {{ 'disabled' if not ours or not guard.get('ok') }}>Switch emission on</button>
+      {% endif %}
     </form>
     {% endif %}
     {% if em_on %}
@@ -196,7 +205,11 @@
     <form method="post" action="/rga/em"
           onsubmit="return confirm('Switch the electron multiplier on? {{ (guard.get('em_reason') or '')|replace("'", '') }}.');">
       <input type="hidden" name="action" value="on">
+      {% if emi.get('pending') %}
+      <button type="button" class="working" disabled>EM starting…</button>
+      {% else %}
       <button type="submit" class="on" {{ 'disabled' if not ours or em_why }}>Switch EM on</button>
+      {% endif %}
     </form>
     {% endif %}
   </div>
@@ -526,7 +539,34 @@
   // left alone; in the others, what was typed, chosen or ticked is put back.
   const LIVE = ['rga-ident', 'rga-state', 'rga-controls', 'acq-status', 'rga-files'];
   const keyOf = e => (e.form ? e.form.getAttribute('action') : '') + '|' + e.name;
-  async function refresh() {
+  // A pressed button: grey every control at once, say "working…" on the
+  // pressed one, and stop the refresh from swapping fresh (enabled) buttons
+  // in while the command is on its way. The page that comes back after the
+  // service answers clears it. A cancelled confirm() leaves it untouched.
+  let busy = false;
+  document.addEventListener('submit', e => {
+    const panel = document.getElementById('rga-controls');
+    if (e.defaultPrevented || !panel || !panel.contains(e.target)) return;
+    busy = true;
+    panel.classList.add('busy');
+    const pressed = e.submitter || e.target.querySelector('button[type=submit]');
+    // After the form data is taken: a disabled button would not be sent.
+    setTimeout(() => {
+      panel.querySelectorAll('button').forEach(b => { b.disabled = true; });
+      if (pressed) { pressed.classList.add('working'); pressed.textContent = 'working…'; }
+    }, 0);
+  });
+  // Back/forward can show the page from cache with the buttons still greyed:
+  // bring the parts back from the server, whether they differ or not.
+  window.addEventListener('pageshow', e => {
+    if (!e.persisted) return;
+    busy = false;
+    document.getElementById('rga-controls')?.classList.remove('busy');
+    refresh(true);
+  });
+
+  async function refresh(force) {
+    if (busy) return;
     let doc;
     try {
       const r = await fetch(location.pathname, {cache: 'no-store'});
@@ -535,7 +575,8 @@
     } catch (e) { return; }
     for (const id of LIVE) {
       const old = document.getElementById(id), neu = doc.getElementById(id);
-      if (!old || !neu || old.innerHTML === neu.innerHTML) continue;
+      if (old && neu && 'pending' in neu.dataset) old.dataset.pending = neu.dataset.pending;
+      if (!old || !neu || (!force && old.innerHTML === neu.innerHTML)) continue;
       if (old.contains(document.activeElement)) continue;
       const kept = {};
       old.querySelectorAll('input[name]:not([type=hidden]), select[name], textarea[name]')
@@ -550,7 +591,13 @@
          });
     }
   }
-  setInterval(refresh, 5000);
+  // Every 5 s; every 2 s while emission or the EM is switching, so the
+  // button comes back as soon as the analyser has followed.
+  (function loop() {
+    const p = document.getElementById('rga-controls');
+    const fast = p && p.dataset.pending === 'yes';
+    setTimeout(async () => { await refresh(); loop(); }, fast ? 2000 : 5000);
+  })();
 })();
 </script>
 {% endblock %}

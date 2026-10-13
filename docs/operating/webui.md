@@ -52,6 +52,13 @@ swaps in only the parts that changed (state, controls, saved files), leaving
 alone the part your cursor is in and putting back what you typed, chose or
 ticked elsewhere. The spectrum has its own fetch, every two seconds.
 
+**A pressed button greys every control** on the RGA page and reads
+*working…* until the service has answered — a command takes seconds, and a
+button that stayed live invited a second click. While the analyser is still
+switching after that, the button says *Emission starting…* or *EM
+starting…* (the analyser's own "request pending" bits) and the page
+refreshes every two seconds until it has followed.
+
 Every other page except **Logs** reloads itself **every ten seconds**, so a
 screen left open is never showing yesterday.
 
