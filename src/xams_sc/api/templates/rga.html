@@ -33,8 +33,13 @@
     .rga-pair, .rga-main { grid-template-columns:minmax(0,1fr); }
   }
   .rga-pair > .card, .rga-main > .card { margin:0; }
-  .rga-controls h3 { margin:1rem 0 .4rem 0; font-size:.95em; }
-  .rga-controls h3:first-of-type { margin-top:.2rem; }
+  /* Content inside .body, padded like every other card (base.html); the
+     sections are told apart by small headings and a hairline, as the
+     cards' own titles are. */
+  .rga-controls h3 { margin:1rem 0 .5rem 0; padding-top:.8rem; border-top:1px solid var(--line);
+                     font-size:.72rem; font-weight:600; text-transform:uppercase;
+                     letter-spacing:.06em; color:var(--dim); }
+  .rga-controls h3:first-of-type { margin-top:0; padding-top:0; border-top:none; }
   .rga-controls form { margin:.3rem 0; }
   /* Inputs and buttons look like the Control page's (.reset-form in
      base.html), at their own width: a column of full-width bars reads as one
@@ -140,6 +145,7 @@
 <div class="rga-main">
 <div class="card rga-controls" id="rga-controls">
   <h2>Controls</h2>
+  <div class="body">
 
   <h3>Control</h3>
   {% if not ours %}
@@ -243,12 +249,13 @@
     {% else %}nothing to save: run a scan first{% endif %}
   </div>
   {% endif %}
-
+  </div>
 </div>
 
 <div class="card">
   <h2>Spectrum</h2>
-  <div id="acq-status" class="dim">
+  <div class="body">
+  <div id="acq-status" class="dim" style="font-size:.85em">
     {% if acq %}{{ acq.recipe }}: {{ acq.state }}, {{ acq.done }} of {{ acq.of }} scans{% if acq.saved %}, saved as {{ acq.saved }}{% endif %}{% if acq.error %} — {{ acq.error }}{% endif %}{% else %}no acquisition yet{% endif %}
   </div>
   <canvas id="spectrum" aria-label="live spectrum"></canvas>
@@ -257,7 +264,7 @@
     <label><input type="checkbox" id="labels" checked> molecules</label>
     <span id="plot-note"></span>
   </div>
-
+  </div>
 </div>
 </div>
 
@@ -283,7 +290,7 @@
   <div class="note">The ten newest, from <code>data/rga/</code> on this PC. Read
     one in Python with <code>xams_sc.rga_file.load_rga(path)</code>.</div>
   {% else %}
-  <p class="dim">None yet.</p>
+  <div class="empty">None yet.</div>
   {% endif %}
 </div>
 
