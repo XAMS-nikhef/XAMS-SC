@@ -689,7 +689,7 @@ class TestEmissionOn:
 
     @pytest.mark.parametrize("value, quality, unit, words", [
         (6e-4, "ok", "mbar", "at or above the limit"),
-        (5e-4, "ok", "mbar", "at or above the limit"),
+        (4e-4, "ok", "mbar", "at or above the limit"),
         (None, "error", "mbar", "quality is error"),
         (1e-5, "ok", "bar", "expects mbar"),
     ])
@@ -1006,8 +1006,21 @@ class TestEmLimitConfiguration:
         with pytest.raises(ValueError, match="emission limit"):
             RgaService(config, RecordingBus(), lock_dir=pathlib.Path(tempfile.mkdtemp()))
 
-    def test_the_configured_limit(self, config):
-        assert config.devices["rga"]["em_guard_limit_mbar"] == pytest.approx(1e-5)
+    def test_the_configured_limits_are_a_little_under_the_datasheet(self, config):
+        """4e-4 and 4e-5 mbar (A.P. Colijn, 13 October 2026); datasheet 5e-4
+        (Faraday) and 5e-5 (C-SEM)."""
+        assert config.devices["rga"]["guard_limit_mbar"] == pytest.approx(4e-4)
+        assert config.devices["rga"]["em_guard_limit_mbar"] == pytest.approx(4e-5)
+
+    @pytest.mark.parametrize("limit", [6e-4, 1e-3, 0])
+    def test_an_emission_limit_above_the_datasheet_is_refused(
+            self, monkeypatch, tmp_path, limit):
+        config = load()
+        config.devices["rga"] = dict(config.devices["rga"], guard_limit_mbar=limit,
+                                     data_dir=str(tmp_path / "rga"))
+        monkeypatch.setattr(rga, "ROOT", pathlib.Path("/"))
+        with pytest.raises(ValueError, match="guard_limit_mbar"):
+            RgaService(config, RecordingBus(), lock_dir=pathlib.Path(tempfile.mkdtemp()))
 
 
 class TestEmOn:
@@ -1023,18 +1036,22 @@ class TestEmOn:
         assert service.bus.last_json("xams/audit")["action"] == "rga_em_on"
 
     def test_between_the_two_limits_emission_yes_em_no(self, monkeypatch, tmp_path, analyser):
-        """p105 = 2e-5 mbar, as on 13 October 2026: fine for emission, too
-        high for the EM."""
-        service = emission_held(monkeypatch, tmp_path, analyser, p=2e-5)
+        """p105 = 1e-4 mbar: fine for emission, too high for the EM."""
+        service = emission_held(monkeypatch, tmp_path, analyser, p=1e-4)
         ack = em(service, "on")
-        assert not ack["ok"] and "EM limit" in ack["reason"] and "1.0e-05" in ack["reason"]
+        assert not ack["ok"] and "EM limit" in ack["reason"] and "4.0e-05" in ack["reason"]
         assert not analyser["device"].em
         guard = service.bus.last_json("xams/rga/info")["guard"]
         assert guard["ok"] and not guard["em_ok"]
 
     def test_at_exactly_the_limit_it_is_refused(self, monkeypatch, tmp_path, analyser):
-        service = emission_held(monkeypatch, tmp_path, analyser, p=1e-5)
+        service = emission_held(monkeypatch, tmp_path, analyser, p=4e-5)
         assert not em(service, "on")["ok"]
+
+    def test_just_under_the_limit_it_goes_on(self, monkeypatch, tmp_path, analyser):
+        """2e-5 mbar, the p105 of 13 October 2026: allowed with 4e-5."""
+        service = emission_held(monkeypatch, tmp_path, analyser, p=2e-5)
+        assert em(service, "on")["ok"]
 
     def test_not_with_emission_off(self, monkeypatch, tmp_path, analyser):
         service = holding(monkeypatch, tmp_path, analyser, p=5e-6)
@@ -1072,7 +1089,7 @@ class TestEmOff:
     def test_p105_reaching_the_em_limit_switches_only_the_em_off(
             self, monkeypatch, tmp_path, analyser):
         service = em_running(monkeypatch, tmp_path, analyser)
-        p105(service, 2e-5)
+        p105(service, 4e-5)
         service.read()
         device = analyser["device"]
         assert not device.em and device.emission
@@ -1141,7 +1158,7 @@ class TestEmAcquisition:
         assert command(service, "_handle_scan", "xams/ack/rga/scan",
                        action="start", recipe="quick")["ok"]
         analyser["device"].queue = []          # running, no scan finished yet
-        p105(service, 2e-5)
+        p105(service, 1e-4)
         service.read()
         acq = service.bus.last_json("xams/rga/info")["acquisition"]
         assert acq["state"] == "stopped" and "EM switched off" in acq["error"]

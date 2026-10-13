@@ -145,20 +145,22 @@ rga:
   # Emission On is refused unless p105 is fresh and below the limit; the
   # service switches emission Off at once at the limit, after the grace when
   # p105 stops arriving, and after emission_idle_off_s without a scan or a
-  # command. Limit: A.P. Colijn, 13 October 2026.
+  # command. Limit 4e-4 mbar, a little under the datasheet's 5e-4 for the
+  # Faraday cup; the service refuses to start with more than 5e-4.
+  # A.P. Colijn, 13 October 2026 (was 5e-4 the same day).
   guard_channel: p105
-  guard_limit_mbar: 5.0e-4
+  guard_limit_mbar: 4.0e-4
   guard_max_age_s: 30
   guard_grace_s: 60
   emission_idle_off_s: 3600
   # The ELECTRON MULTIPLIER's own limit on the same p105 (step 4). EM On is
   # refused unless emission is on and p105 is fresh and below it; the service
   # switches the EM Off at once at the limit, after the same grace when p105
-  # stops arriving, and always before emission goes off. Datasheet maximum
-  # with the C-SEM on: 5e-5 mbar; 1e-5 keeps a factor five. The service
-  # refuses to start with a value above 5e-5 or above guard_limit_mbar.
-  # A.P. Colijn, 13 October 2026.
-  em_guard_limit_mbar: 1.0e-5
+  # stops arriving, and always before emission goes off. Limit 4e-5 mbar, a
+  # little under the datasheet's 5e-5 with the C-SEM on. The service refuses
+  # to start with a value above 5e-5 or above guard_limit_mbar.
+  # A.P. Colijn, 13 October 2026 (was 1e-5 the same day).
+  em_guard_limit_mbar: 4.0e-5
   # Control is given back after this long without a scan or a command (not
   # while emission is on).
   release_idle_s: 300

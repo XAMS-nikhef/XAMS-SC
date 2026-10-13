@@ -60,9 +60,10 @@ CONTROL_NONE, CONTROL_US, CONTROL_OTHER = 0, 1, 2
 
 SCANNING_BIT = 1 << 1
 INTERLOCK_BIT = 1 << 27
-# The datasheet's maximum operating pressure with the C-SEM (electron
-# multiplier) on: 5e-5 hPa = mbar (QMG 250 M, "Technical data"; Faraday:
-# 5e-4). The configured EM limit may be lower, never higher.
+# The datasheet's maximum operating pressures (QMG 250 M, "Technical data"),
+# hPa = mbar: 5e-4 with the Faraday cup, 5e-5 with the C-SEM (electron
+# multiplier). The configured limits may be lower, never higher.
+DATASHEET_MAX_MBAR = 5e-4
 EM_DATASHEET_MAX_MBAR = 5e-5
 # 69 is CF3+, the largest of the fluorocarbon (PTFE) series seen on
 # 13 October 2026; it tells whether a peak at 131 is C3F5+ rather than Xe.
@@ -148,7 +149,11 @@ class RgaService(BaseService):
         # sense of DESIGN.md section 10 rule 1. It refuses emission on, and
         # switches emission off, on the slow-control pressure p105.
         self._guard_channel = str(self._spec.get("guard_channel", "p105"))
-        self._guard_limit = float(self._spec.get("guard_limit_mbar", 5e-4))
+        self._guard_limit = float(self._spec.get("guard_limit_mbar", 4e-4))
+        if not 0 < self._guard_limit <= DATASHEET_MAX_MBAR:
+            raise ValueError(
+                f"devices.yaml rga.guard_limit_mbar = {self._guard_limit:g}: must be "
+                f"above 0 and at most {DATASHEET_MAX_MBAR:g} mbar (datasheet)")
         self._guard_max_age = float(self._spec.get("guard_max_age_s", 30))
         self._guard_grace = float(self._spec.get("guard_grace_s", 60))
         self._guard_seen: float | None = None     # monotonic receipt of p105
@@ -161,7 +166,7 @@ class RgaService(BaseService):
         # 4). Same freshness rules and grace as the emission guard. A limit
         # above the datasheet's or above the emission limit is a
         # configuration error, refused at start rather than clipped.
-        self._em_limit = float(self._spec.get("em_guard_limit_mbar", 1e-5))
+        self._em_limit = float(self._spec.get("em_guard_limit_mbar", 4e-5))
         if not 0 < self._em_limit <= min(EM_DATASHEET_MAX_MBAR, self._guard_limit):
             raise ValueError(
                 f"devices.yaml rga.em_guard_limit_mbar = {self._em_limit:g}: must be "
