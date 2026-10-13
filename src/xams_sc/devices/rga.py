@@ -61,6 +61,9 @@ CONTROL_NONE, CONTROL_US, CONTROL_OTHER = 0, 1, 2
 SCANNING_BIT = 1 << 1
 INTERLOCK_BIT = 1 << 27
 EMISSION_PENDING_BIT = 1 << 28      # asked for, not yet on (API: "System Status")
+# How long a requested emission or EM state is waited for before the page
+# stops saying "starting..." / "stopping..." and says it did not follow.
+SWITCH_WAIT_S = 30.0
 # The datasheet's maximum operating pressures (QMG 250 M, "Technical data"),
 # hPa = mbar: 5e-4 with the Faraday cup, 5e-5 with the C-SEM (electron
 # multiplier). The configured limits may be lower, never higher.
@@ -175,6 +178,12 @@ class RgaService(BaseService):
                 f"mbar (datasheet {EM_DATASHEET_MAX_MBAR:g}, emission limit "
                 f"{self._guard_limit:g})")
         self._em_note: str | None = None          # why the EM last went off by itself
+        # What emission and the EM were last asked to be, and when: until the
+        # analyser reports that state (or SWITCH_WAIT_S passes) the page shows
+        # them as switching and keeps the button greyed. The analyser's own
+        # "request pending" bits did not cover the seconds in between
+        # (13 October 2026).
+        self._wanted: dict[str, tuple[bool, float]] = {}
         self._em_settings: dict = {}              # voltage, gain, as last read
         # Whether the analyser's stored EM gain has been checked against the
         # Faraday cup. It had not on 13 October 2026 (stored 1234.57, measured
@@ -310,6 +319,13 @@ class RgaService(BaseService):
         # Every cycle, not only on a change: the guard's p105 and its age are
         # what the page shows beside the emission button.
         self._publish_info()
+        # Read fast while something is switching, so the page follows within
+        # a second; back to the idle pace after (a scan keeps its own).
+        with self._acq_lock:
+            scanning = self._acq is not None and self._acq["state"] == "scanning"
+        if not scanning:
+            self.interval_s = (self._scan_interval if self._wanted
+                               else self._idle_interval)
 
         now = utcnow()
         out = []
@@ -339,6 +355,7 @@ class RgaService(BaseService):
     def _publish_info(self) -> None:
         with self._acq_lock:
             acq = self._acq_view()
+        emission_to, em_to = self.switching("emission"), self.switching("em")
         record = {"t": iso(utcnow()), "identity": self._identity,
                   "control": self._control, "acquisition": acq,
                   "recipes": {n: {"description": r["description"], "scans": r["scans"],
@@ -347,12 +364,14 @@ class RgaService(BaseService):
                   "recipe_error": self._recipe_error,
                   "saved_files": self._saved_files,
                   "emission": {"on": self.emission_is_on(),
-                               "pending": bool((self._status_word or 0) & EMISSION_PENDING_BIT),
+                               "pending": emission_to,
+                               "wanted": emission_to,
                                "interlock": bool((self._status_word or 0) & INTERLOCK_BIT),
                                "note": self._emission_note},
                   "em": {"on": self.em_is_on(),
                          "gain_calibrated": self._em_gain_calibrated,
-                         "pending": bool((self._status_word or 0) & EM_PENDING_BIT),
+                         "pending": em_to,
+                         "wanted": em_to,
                          "interlock": bool((self._status_word or 0) & EM_INTERLOCK_BIT),
                          "note": self._em_note, **self._em_settings},
                   "guard": self.guard_view()}
@@ -498,6 +517,39 @@ class RgaService(BaseService):
         """The REAL EM state: systemStatus bit 23, as last read."""
         return self._status_word is not None and em_on(self._status_word)
 
+    def _expect(self, kind: str, on: bool) -> None:
+        """Note that `kind` ("emission" or "em") was asked to go on or off, and
+        tell the page now, before the command is acknowledged: the page that
+        loads after the answer must already show it as switching."""
+        self._wanted[kind] = (on, time.monotonic())
+        self.interval_s = self._scan_interval
+        self._publish_info()
+
+    def switching(self, kind: str) -> str | None:
+        """"On" or "Off" while `kind` is on its way there, else None. Clears
+        the request once the analyser reports it, or after SWITCH_WAIT_S."""
+        bit = EMISSION_PENDING_BIT if kind == "emission" else EM_PENDING_BIT
+        actual = self.emission_is_on() if kind == "emission" else self.em_is_on()
+        wanted = self._wanted.get(kind)
+        if wanted is not None:
+            on, since = wanted
+            if on == actual:
+                del self._wanted[kind]
+            elif time.monotonic() - since > SWITCH_WAIT_S:
+                del self._wanted[kind]
+                note = (f"asked for {'On' if on else 'Off'} at {iso(utcnow())} but the "
+                        f"analyser did not follow within {SWITCH_WAIT_S:.0f} s")
+                log.warning("RGA %s: %s", kind, note)
+                if kind == "emission":
+                    self._emission_note = note
+                else:
+                    self._em_note = note
+            else:
+                return "On" if on else "Off"
+        if (self._status_word or 0) & bit:
+            return "On"
+        return None
+
     def guard_view(self) -> dict:
         """p105 as the guard sees it: value, age, and whether emission and
         the EM may go on."""
@@ -559,6 +611,7 @@ class RgaService(BaseService):
         except (OSError, MMSPError) as exc:
             log.error("COULD NOT SWITCH THE RGA EM OFF (%s): %s", reason, exc)
             return False
+        self._expect("em", False)
         if actor == "rga service":
             self._em_note = f"switched off by the service at {iso(utcnow())}: {reason}"
             log.warning("RGA EM switched OFF by the service: %s", reason)
@@ -613,6 +666,7 @@ class RgaService(BaseService):
         except (OSError, MMSPError) as exc:
             log.error("COULD NOT SWITCH RGA EMISSION OFF (%s): %s", reason, exc)
             return
+        self._expect("emission", False)
         self._emission_note = f"switched off by the service at {iso(utcnow())}: {reason}"
         log.warning("RGA emission switched OFF by the service: %s", reason)
         self._audit("rga_emission_off", "rga", "On", "Off", "ok", reason, "rga service")
@@ -683,6 +737,7 @@ class RgaService(BaseService):
                     # Never leave emission on behind a released analyser:
                     # nothing could switch it off then.
                     self._client.set_emission(False)
+                    self._expect("emission", False)
                     self._audit("rga_emission_off", "rga", "On", "Off", "ok",
                                 "switched off before releasing control", actor)
                     detail = "released, emission switched off first"
@@ -856,6 +911,7 @@ class RgaService(BaseService):
             self._ack(ACK_RGA_EMISSION, False, action, actor, f"the analyser said: {exc}")
             return
         want = "On" if what == "on" else "Off"
+        self._expect("emission", what == "on")
         if asked != want:
             # The analyser answered "wasSet", so the request was taken; only
             # its read-back has not caught up. Saying "refused, nothing was
@@ -929,6 +985,7 @@ class RgaService(BaseService):
             self._ack(ACK_RGA_EM, False, action, actor, f"the analyser said: {exc}")
             return
         self._em_note = None
+        self._expect("em", True)
         why = self.em_guard_allows()[1]
         log.warning("RGA EM On requested by %s (%s)", actor, why)
         detail = (f"EM on requested ({why}); the analyser takes a few seconds to follow"

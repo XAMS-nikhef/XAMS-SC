@@ -180,7 +180,12 @@
        else ('EM limit: ' ~ guard.get('em_reason')) if not guard.get('em_ok')
        else '' %}
   <div class="line">
-    {% if emission_on %}
+    {# Switching: from the moment the request is accepted until the analyser
+       reports the new state (the service's `pending`, at most 30 s), the
+       button says so and cannot be pressed again. #}
+    {% if emis.get('pending') %}
+    <button type="button" class="working" disabled>{{ 'Emission starting…' if emis.get('wanted') == 'On' else 'Emission stopping…' }}</button>
+    {% elif emission_on %}
     <form method="post" action="/rga/emission">
       <input type="hidden" name="action" value="off">
       <button type="submit" class="off" {{ 'disabled' if not ours }}>Switch emission off</button>
@@ -189,14 +194,12 @@
     <form method="post" action="/rga/emission"
           onsubmit="return confirm('Switch the RGA emission on? The filament must be under vacuum. {{ (guard.get('reason') or '')|replace("'", '') }}.');">
       <input type="hidden" name="action" value="on">
-      {% if emis.get('pending') %}
-      <button type="button" class="working" disabled>Emission starting…</button>
-      {% else %}
       <button type="submit" class="on" {{ 'disabled' if not ours or not guard.get('ok') }}>Switch emission on</button>
-      {% endif %}
     </form>
     {% endif %}
-    {% if em_on %}
+    {% if emi.get('pending') %}
+    <button type="button" class="working" disabled>{{ 'EM starting…' if emi.get('wanted') == 'On' else 'EM stopping…' }}</button>
+    {% elif em_on %}
     <form method="post" action="/rga/em">
       <input type="hidden" name="action" value="off">
       <button type="submit" class="off" {{ 'disabled' if not ours }}>Switch EM off</button>
@@ -205,11 +208,7 @@
     <form method="post" action="/rga/em"
           onsubmit="return confirm('Switch the electron multiplier on? {{ (guard.get('em_reason') or '')|replace("'", '') }}.');">
       <input type="hidden" name="action" value="on">
-      {% if emi.get('pending') %}
-      <button type="button" class="working" disabled>EM starting…</button>
-      {% else %}
       <button type="submit" class="on" {{ 'disabled' if not ours or em_why }}>Switch EM on</button>
-      {% endif %}
     </form>
     {% endif %}
   </div>

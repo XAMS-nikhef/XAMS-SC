@@ -828,13 +828,14 @@ class TestCommandsRunOffTheBusThread:
 
 
 class TestThePageLayout:
-    def page_with(self, webui, emission=0.0, guard_ok=True):
+    def page_with(self, webui, emission=0.0, guard_ok=True, wanted=None):
         client, app, bus = webui
         bus.deliver(TOPIC_RGA_INFO, json.dumps({
             "identity": {"name": "RGA PrismaPro A 200 47504651", "detector": "CDEM"},
             "control": {"controlled": True, "us": True, "client": "xams-sc"},
             "recipes": {"quick": {"description": "", "scans": 2, "seconds": 6.3}},
-            "emission": {"on": bool(emission), "interlock": False, "note": None},
+            "emission": {"on": bool(emission), "interlock": False, "note": None,
+                         "pending": wanted, "wanted": wanted},
             "guard": {"channel": "p105", "value": 1.9e-5 if guard_ok else 7e-4,
                       "unit": "mbar", "quality": "ok", "age_s": 3.0,
                       "limit_mbar": 5e-4, "ok": guard_ok,
@@ -862,6 +863,15 @@ class TestThePageLayout:
     def test_with_emission_on_the_button_switches_it_off(self, webui):
         body = self.page_with(webui, emission=1.0)
         assert 'value="off"' in body and "Switch emission off" in body
+
+    @pytest.mark.parametrize("emission, wanted, label", [
+        (0.0, "On", "Emission starting…"), (1.0, "Off", "Emission stopping…")])
+    def test_while_switching_no_emission_button_can_be_pressed(
+            self, webui, emission, wanted, label):
+        body = self.page_with(webui, emission=emission, wanted=wanted)
+        assert label in body
+        assert 'action="/rga/emission"' not in body
+        assert 'data-pending="yes"' in body
 
 
 # ============================================================ keeping data
@@ -1299,3 +1309,47 @@ class TestOnTheVm:
         grants = [l for l in script.splitlines() if "xams_writer" in l and "rga_" in l]
         assert not [l for l in grants if "UPDATE" in l or "DELETE" in l]
         assert "--load --missing" in script
+
+
+class TestSwitchingIsShownUntilTheStateIsReached:
+    """13 October 2026: 'working...' went away before emission was on - the
+    analyser's own pending bits did not cover the seconds in between."""
+
+    def test_emission_on_stays_starting_until_the_analyser_reports_it(
+            self, monkeypatch, tmp_path, analyser):
+        service = holding(monkeypatch, tmp_path, analyser)
+        device = analyser["device"]
+        assert emission(service, "on")["ok"]
+        # Published before the acknowledgement, for the page that follows it.
+        assert service.bus.last_json("xams/rga/info")["emission"]["wanted"] == "On"
+        device.emission = False                # the filament has not lit yet
+        service.read()
+        info = service.bus.last_json("xams/rga/info")["emission"]
+        assert info["pending"] == "On" and not info["on"]
+        assert service.interval_s == service._scan_interval   # reading fast
+        device.emission = True
+        service.read()
+        info = service.bus.last_json("xams/rga/info")["emission"]
+        assert info["on"] and info["pending"] is None
+        assert service.interval_s == service._idle_interval
+
+    def test_a_state_never_reached_is_given_up_with_a_note(
+            self, monkeypatch, tmp_path, analyser):
+        service = holding(monkeypatch, tmp_path, analyser)
+        assert emission(service, "on")["ok"]
+        analyser["device"].emission = False
+        monkeypatch.setattr(rga, "SWITCH_WAIT_S", 0.0)
+        service.read()
+        info = service.bus.last_json("xams/rga/info")["emission"]
+        assert info["pending"] is None and "did not follow" in info["note"]
+
+    def test_em_off_shows_stopping_until_it_is_off(self, monkeypatch, tmp_path, analyser):
+        service = em_running(monkeypatch, tmp_path, analyser)
+        device = analyser["device"]
+        assert em(service, "off")["ok"]
+        device.em = True                       # still on, for now
+        service.read()
+        assert service.bus.last_json("xams/rga/info")["em"]["wanted"] == "Off"
+        device.em = False
+        service.read()
+        assert service.bus.last_json("xams/rga/info")["em"]["pending"] is None
