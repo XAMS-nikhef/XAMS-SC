@@ -74,7 +74,7 @@ output 1 — both CAEN supplies: `VSET` per channel, and energising a channel
 on or off — and the residual gas analyser: control, scan setup, start and stop,
 from the [RGA page](../drivers/rga.md). It never switches the analyser's
 emission. How to drive either is in
-[The web interface](webui.md#the-controls); the same commands exist as
+[The web interface](webui.md#control); the same commands exist as
 `xams-ctl hv-set`, `hv-standby`, `hv-on`, `hv-off` and `flow-reset`.
 
 Every write is range-checked against `channels.yaml`, **read back from the
