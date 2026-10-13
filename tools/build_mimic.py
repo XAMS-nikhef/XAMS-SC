@@ -84,6 +84,42 @@ SYMBOLS = {
 
 
 
+# Labels on the drawing replaced when the mimic is built: printed word -> tag.
+#
+# The PKR full-range gauge beside the turbo is drawn as "P" with a subscript
+# "pirani" (one word to the text extractor, "Ppirani"). Its channel is p105
+# (13 October 2026), so the label becomes P105 and the gauge then gets its
+# value in its bubble exactly like P101-P104.
+#
+# Done HERE, in memory, rather than by editing the PDF: the PDF is saved from
+# Illustrator with its editing data embedded, and Illustrator reopens that
+# embedded copy - an edit made to the PDF from outside would silently vanish
+# at the next save in Illustrator. When the drawing itself says P105, the
+# entry below finds nothing and can be removed.
+RELABEL = {"Ppirani": "P105"}
+
+
+def relabel(page) -> None:
+    """Replace the labels in RELABEL, keeping position, size and direction.
+
+    Only the text is redacted; the line art under and around it (the bubble,
+    the leader) is left alone.
+    """
+    words = [w for w in page.get_text("words") if w[4] in RELABEL]
+    if not words:
+        return
+    for x0, y0, x1, y1, word, *_ in words:
+        page.add_redact_annot(pymupdf.Rect(x0, y0, x1, y1))
+    page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_NONE,
+                          graphics=pymupdf.PDF_REDACT_LINE_ART_NONE)
+    for x0, y0, x1, y1, word, *_ in words:
+        # The drawing's labels run top to bottom on the (portrait) page, the
+        # direction rotate=270 produces; 8.04 pt is the size of P101-P104.
+        page.insert_text(pymupdf.Point(x0 + 2, y0), RELABEL[word], fontsize=8.04,
+                         fontname="helv", rotate=270)
+        print(f"  relabelled {word} -> {RELABEL[word]}")
+
+
 # The sheet furniture, in the ORIGINAL (unrotated) page coordinates.
 # Measured from the PDF. The title block sits in the corner; the frame is the
 # sheet border, removed by cropping just inside it.
@@ -130,7 +166,7 @@ DARK_TEXT = "#dfe4ec"
 # machines; these are for people reading a diagram at a glance.
 UNIT_LABEL = {
     "C": "°C", "K": "K", "bar": "bar", "g/min": "g/min", "g": "g",
-    "V": "V", "uA": "µA", "W": "W", "percent": "%", "min": "min",
+    "V": "V", "uA": "µA", "W": "W", "percent": "%", "min": "min", "mbar": "mbar",
     "bool": "",            # "on battery" is not a quantity; no unit to show
     "TBD": "?",            # a unit nobody has established yet, said out loud
 }
@@ -300,10 +336,20 @@ def main() -> int:
     # Before anything reads coordinates: cropping moves the origin, and every
     # tag position below must be measured in the cropped space.
     strip_sheet_furniture(page)
+    relabel(page)
     width, height = page.rect.width, page.rect.height
 
     svg_text = page.get_svg_image(text_as_path=False)
     root = ET.fromstring(svg_text)
+
+    # Labels set in Helvetica (P101-P104 and PMAIN since the 23 September
+    # relabel, and P105 from RELABEL) come out as "Nimbus Sans" with no
+    # generic fallback, which a browser without that font draws in a SERIF
+    # face. Dropping the attribute lets them inherit the page font, which is
+    # what the drawing's other labels already show in.
+    for el in root.iter():
+        if "Nimbus" in (el.get("font-family") or ""):
+            del el.attrib["font-family"]
 
     # STRIP THE DRAWING FURNITURE, AND RECOLOUR FOR A DARK PAGE.
     #
@@ -411,10 +457,13 @@ def main() -> int:
         # has to keep working for years without anyone maintaining it.
         # Centred inside a bubble; left-aligned when it sits beside a label,
         # so a negative sign grows away from the text rather than into it.
+        # A pressure in mbar is written as "1.5e-2": six characters, wider
+        # than the four a 23 pt bubble takes at 9 px, so it is set smaller.
+        exp = config.channels[channel].unit == "mbar"
         common = {
             "x": f"{fx:.1f}", "y": f"{fy:.1f}",
             "text-anchor": "middle" if bubble is not None else "start",
-            "font-family": "Consolas, monospace", "font-size": "9",
+            "font-family": "Consolas, monospace", "font-size": "6.5" if exp else "9",
             "font-weight": "bold",
         }
         halo = ET.SubElement(root, f"{{{SVG_NS}}}text")
@@ -448,6 +497,10 @@ def main() -> int:
         unit_text = UNIT_LABEL.get(config.channels[channel].unit,
                                    config.channels[channel].unit)
         value.set("data-unit", unit_text)
+        # A vacuum pressure spans twelve decades: written as 1.5e-2, never
+        # as "0.02" or "0.00".
+        if config.channels[channel].unit == "mbar":
+            value.set("data-format", "exp")
         if bubble is not None and unit_text:
             unit = ET.SubElement(root, f"{{{SVG_NS}}}text")
             unit.set("id", f"u-{channel}")

@@ -305,3 +305,30 @@ class TestTheTurbo:
                                        "over temperature", "no data", "Err "])
     def test_every_state_has_words_as_well_as_a_colour(self, page, state):
         assert state in page
+
+
+class TestThePkrGauge:
+    """P105: the drawing's "P_pirani" is relabelled when the mimic is built."""
+
+    @pytest.fixture
+    def svg(self):
+        return pathlib.Path(
+            "src/xams_sc/api/static/xams_pid.svg").read_text(encoding="utf-8")
+
+    def test_the_old_label_is_gone_and_p105_has_a_slot(self, svg):
+        assert "pirani" not in svg
+        assert ">P105<" in svg
+        assert 'id="v-p105"' in svg
+
+    def test_the_pressure_is_written_in_scientific_notation(self, svg, page):
+        tag = re.search(r'<text id="v-p105"[^>]*>', svg).group(0)
+        assert 'data-format="exp"' in tag
+        assert "toExponential" in page
+
+    def test_no_label_falls_back_to_a_serif_font(self, svg):
+        """Helvetica-set labels came out as "Nimbus Sans" with no fallback."""
+        assert "Nimbus" not in svg
+
+    def test_p105_is_on_the_drawing_and_its_raw_volts_are_not(self, config):
+        assert config.channels["p105"].on_pid is True
+        assert config.channels["p105_v"].on_pid is False

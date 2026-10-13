@@ -20,7 +20,7 @@ most noticeable.
 
 | Alias | Module | Slot | Reads | Channels |
 |---|---|---|---|---|
-| `9207` | NI 9207 | 1 | ±10 V | `ai0:7` — 4 pressures, detector pressure, flow meter (ai6), PKR vacuum gauge (ai7, floating, `p105`), ai4 unconnected |
+| `9207` | NI 9207 | 1 | ±10 V | `ai0:7` — 4 pressures, detector pressure, flow meter (ai6), PKR vacuum gauge (ai7, floating, `p105`, on the P&I as P105), ai4 unconnected |
 | `9207` | NI 9207 | 1 | 4-20 mA | `ai8:9` — strain gauges `sg101`, `sg102`; `ai10:15` unconnected |
 | `9216_1` | NI 9216 | 2 | PT100 | `ai0:6` — water, xenon and heat-exchanger temperatures, ambient |
 | `9216_2` | NI 9216 | 3 | PT100 | **none — entirely unconnected** |
