@@ -726,8 +726,16 @@ class RgaService(BaseService):
             return
         want = "On" if what == "on" else "Off"
         if asked != want:
-            self._ack(ACK_RGA_EMISSION, False, action, actor,
-                      f"asked for {want}, the analyser reports {asked}", old=old, new=want)
+            # The analyser answered "wasSet", so the request was taken; only
+            # its read-back has not caught up. Saying "refused, nothing was
+            # changed" here would be wrong (13 October 2026: it was, and the
+            # emission came on).
+            log.warning("RGA emission %s requested by %s; the analyser accepted it "
+                        "but still reports %s", want, actor, asked)
+            self._ack(ACK_RGA_EMISSION, True, action, actor,
+                      f"emission {want} requested and accepted, but the analyser's "
+                      f"read-back still says {asked}; check the emission state "
+                      "in a few seconds", old=old, new=want)
             return
         self._emission_note = None
         log.warning("RGA emission %s requested by %s%s", want, actor,

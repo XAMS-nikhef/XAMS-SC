@@ -139,7 +139,7 @@ back and stops a running scan. The service releases by itself after
 
 **Recipes** in `config/rga_recipes.yaml`: `survey` (1–200 amu, 10/amu,
 16 ms, 3 scans of ~32 s), `air_leak` (2, 4, 14, 18, 28, 32, 40, 44 at 256 ms,
-10 scans of ~2 s), `xenon` (124–136 amu, 5 scans of ~4 s), `quick` (the
+10 scans of ~2 s), `xenon` (120–136 amu, 5 scans of ~5 s), `quick` (the
 tested 1–50 amu set-up, 2 scans of ~6 s). Validated at startup
 (`rga_file.validate_recipe`): out-of-bounds is refused, never clipped.
 
@@ -253,7 +253,24 @@ there is nothing to save when there is not.
 
 **Not yet tested with emission on.** Tests (fake analyser): 78 for the RGA,
 full suite 1065. The first emission-on run is for the lab, together: take
-control → Emission ON → `quick` → Save → Emission OFF → Release.
+control → Switch emission on → `quick` → Save → Switch emission off → Release.
+
+**First emission-on runs** (13 October 2026, by the user): `xenon` and
+`survey` taken and a survey saved, peaks up to 7 × 10⁻⁹ A. Found there:
+
+- **The setEmission read-back lags the write.** Read straight after the
+  `wasSet`, it still gave the old value, though the write had taken; the page
+  then said "Refused — nothing was changed" while the emission came on, and a
+  second click "worked". `set_emission` now polls the read-back for up to 3 s;
+  if it still disagrees, the request is reported as accepted but unconfirmed
+  (the device did answer `wasSet`), never as refused.
+- The emission buttons are verbs, *Switch emission on/off*, with the state
+  beside them: a button reading "Emission ON" was taken for the state.
+- The spectrum got axes (m/z, ion current with decades), grid, the latest
+  scan filled with the mean over it, bars for single-mass recipes, a read-out
+  under the pointer and the names of common molecules (H2O, N2/CO, O2, Ar,
+  CO2, Xe isotopes, Xe++) where they fit.
+- `xenon` now starts at 120 amu, a few below the lightest isotope (124).
 
 ---
 
@@ -315,7 +332,7 @@ PrismaPro ◄─HTTP─► rga service (own process) ──MQTT──► web UI:
 | `sinks/` | `rga_summary` rows on "saved" events; rebuild from `data/rga/` | — |
 | `api/templates/rga.html` | the RGA page | — |
 | `config/devices.yaml` `rga:` | address, client name, summary masses, p105 limit | — |
-| `config/rga_recipes.yaml` | survey 0–200 amu; air leak 2, 4, 14, 18, 28, 32, 40, 44; xenon 124–136 | — |
+| `config/rga_recipes.yaml` | survey 0–200 amu; air leak 2, 4, 14, 18, 28, 32, 40, 44; xenon 120–136 | — |
 
 **Identity:** `sensorInfo/name` must be `RGA PrismaPro A 200 47504651` and
 `electronicsInfo/serialNumber` `47504651`, or the service refuses to start —
