@@ -511,12 +511,13 @@ of **over-pressure trips** (a rise means it switched emission off itself), the
 electronics temperature, and the named `systemStatus` bits.
 
 The state card also shows **p105 (guard)**: its value, its age and the limit,
-5 × 10⁻⁴ mbar, green when emission may go on.
+4 × 10⁻⁴ mbar for emission and 4 × 10⁻⁵ mbar for the electron multiplier,
+each green when it may go on.
 
 ### Taking it and giving it back
 
 **Take control** before anything else. If another client holds the analyser
-this is refused, saying who; tick *take it anyway* only when you know their
+this is refused, saying who; tick *from another client*, beside the button, only when you know their
 measurement can be cut off — it asks once more. **Release control** gives it
 back (and stops a running scan).
 
@@ -528,14 +529,14 @@ on — and when it stops. PV MassSpec is never locked out by a page left open.
 
 **Switch emission on** asks for a confirmation and is refused — the button is
 greyed, with the reason under it — unless this system holds the analyser, p105
-is fresh (at most 30 s old) and below 5 × 10⁻⁴ mbar, the analyser reports no
+is fresh (at most 30 s old) and below 4 × 10⁻⁴ mbar, the analyser reports no
 hardware errors and its emission interlock is clear. The filament must be
 under vacuum. The emission state follows within seconds. The button says
 what it does; the state is next to it (*now: off*).
 
 **Switch emission off** needs only control. Emission also goes off **by itself**:
 
-- at once when p105 reaches 5 × 10⁻⁴ mbar;
+- at once when p105 reaches 4 × 10⁻⁴ mbar;
 - when p105 stops arriving for more than 90 s;
 - after an hour without a scan or a command;
 - on *Release control*, and when the service stops.
@@ -550,16 +551,19 @@ top of it.
 
 The EM (a CDEM) multiplies the signal by its gain, so peaks a hundred to a
 thousand times smaller than the Faraday cup sees become visible. It has its
-**own, lower pressure limit**: p105 below **1 × 10⁻⁵ mbar**
+**own, lower pressure limit**: p105 below **4 × 10⁻⁵ mbar**
 (`devices.yaml` `em_guard_limit_mbar`; the datasheet allows 5 × 10⁻⁵, the
 service refuses to start with more, or with more than the emission limit).
+Emission's limit, 4 × 10⁻⁴, is likewise a little under the datasheet's 5 × 10⁻⁴.
 
 **Switch EM on** asks for a confirmation and is refused — greyed, with the
 reason under it — unless this system holds the analyser, **emission is on**,
 no scan is running (one detector per acquisition), p105 is fresh and below the
 EM limit, and the analyser reports no hardware errors and no EM interlock.
-Between the two limits — p105 at 2 × 10⁻⁵ mbar, say — emission may be on and
-the EM not.
+Between the two limits — p105 at 1 × 10⁻⁴ mbar, say — emission may be on and
+the EM not. The two buttons sit side by side, with the state of both on the
+line under them; when this system does not hold the analyser they are simply
+greyed.
 
 The EM goes off **by itself**, and the page says why:
 

@@ -41,6 +41,7 @@
      big button, and a recipe name does not need the panel's width. */
   .rga-controls .stack { display:flex; flex-direction:column; gap:.4rem; align-items:flex-start; }
   .rga-controls .line { display:flex; gap:.4rem; align-items:center; flex-wrap:wrap; }
+  .rga-controls .line form { margin:0; }
   .rga-controls input[type=text], .rga-controls select {
     padding:.35rem .5rem; font:inherit; font-size:.85rem; color:var(--text);
     background:var(--bg); border:1px solid var(--line); border-radius:3px; }
@@ -110,9 +111,9 @@
     <tr><th>{{ guard.get('channel') or 'p105' }} (guard)</th>
       <td>{% set gv = guard.get('value') %}{% if gv is number %}{{ '%.2e'|format(gv) }} mbar{% else %}—{% endif %}
           <br><span class="{{ 'good' if guard.get('ok') else 'bad' }}">
-            {{ '<' if guard.get('ok') else '≥' }} {{ '%.0e'|format(guard.get('limit_mbar') or 5e-4) }} mbar (emission)</span>
+            {{ '<' if guard.get('ok') else '≥' }} {{ '%.0e'|format(guard.get('limit_mbar') or 4e-4) }} mbar (emission)</span>
           <br><span class="{{ 'good' if guard.get('em_ok') else 'warn' }}">
-            {{ '<' if guard.get('em_ok') else '≥' }} {{ '%.0e'|format(guard.get('em_limit_mbar') or 1e-5) }} mbar (electron multiplier)</span>
+            {{ '<' if guard.get('em_ok') else '≥' }} {{ '%.0e'|format(guard.get('em_limit_mbar') or 4e-5) }} mbar (electron multiplier)</span>
           {% set ga = guard.get('age_s') %}{% if ga is number %}<span class="dim">({{ '%.0f'|format(ga) }} s ago)</span>{% endif %}</td></tr>
     {% for name, label in [('rga_hw_errors', 'Hardware errors'), ('rga_hw_warnings', 'Hardware warnings')] %}
     {% set c = channels.get(name) %}
@@ -142,67 +143,66 @@
 
   <h3>Control</h3>
   {% if not ours %}
-  <form method="post" action="/rga/control" class="stack"
+  <form method="post" action="/rga/control" class="line"
         onsubmit="return (!this.force.checked || confirm('Another client holds the RGA. Take it from them? A measurement of theirs may be cut off.'));">
     <input type="hidden" name="action" value="take">
     <button type="submit">Take control</button>
-    <label class="dim"><input type="checkbox" name="force" value="yes"> take it anyway, from another client</label>
+    <label class="dim"><input type="checkbox" name="force" value="yes"> from another client</label>
   </form>
   {% else %}
-  <form method="post" action="/rga/control" class="stack"
+  <form method="post" action="/rga/control" class="line"
         onsubmit="return confirm('Give the RGA back{{ ' and switch the EM off' if em_on }}{{ ' and switch emission off' if emission_on }}{{ ' and stop the running scan' if scanning }}?');">
     <input type="hidden" name="action" value="release">
     <button type="submit">Release control</button>
   </form>
   {% endif %}
 
-  {# The button names the action, a verb; the state stands beside it. A
-     button reading "Emission ON" was taken for the state. #}
-  <h3>Emission</h3>
-  {% if emission_on %}
-  <form method="post" action="/rga/emission" class="line">
-    <input type="hidden" name="action" value="off">
-    <button type="submit" class="off" {{ 'disabled' if not ours }}>Switch emission off</button>
-    <span>now: <span class="bad">ON</span></span>
-  </form>
-  {% else %}
-  <form method="post" action="/rga/emission" class="line"
-        onsubmit="return confirm('Switch the RGA emission on? The filament must be under vacuum. {{ (guard.get('reason') or '')|replace("'", '') }}.');">
-    <input type="hidden" name="action" value="on">
-    <button type="submit" class="on" {{ 'disabled' if not ours or not guard.get('ok') }}>Switch emission on</button>
-    <span>now: {% if em and em.healthy %}<span class="good">off</span>{% else %}<span class="dim">unknown</span>{% endif %}</span>
-  </form>
-  {% endif %}
-  <div class="dim" style="font-size:.85em">
-    {% if not ours %}take control first.{% elif not guard.get('ok') and not emission_on %}<span class="bad">{{ guard.get('reason') }}</span>{% else %}{{ guard.get('reason') }}{% endif %}
-  </div>
-
-  {# The electron multiplier: its own, lower p105 limit (devices.yaml
-     em_guard_limit_mbar), only with emission on, never during a scan. The
-     reason it cannot go on is shown, not just a grey button. #}
-  <h3>Electron multiplier</h3>
-  {% if em_on %}
-  <form method="post" action="/rga/em" class="line">
-    <input type="hidden" name="action" value="off">
-    <button type="submit" class="off" {{ 'disabled' if not ours }}>Switch EM off</button>
-    <span>now: <span class="bad">ON</span></span>
-  </form>
-  {% else %}
-  {% set em_why = 'take control first' if not ours
-       else 'switch emission on first' if not emission_on
+  {# Emission and the electron multiplier side by side. The buttons name the
+     action, a verb; the state is on the line under them (a button reading
+     "Emission ON" was taken for the state). The EM has its own, lower p105
+     limit (devices.yaml em_guard_limit_mbar), only with emission on, never
+     during a scan. Without control both are simply greyed. #}
+  <h3>Emission and electron multiplier</h3>
+  {% set em_why = 'switch emission on first' if not emission_on
        else 'a scan is running' if scanning
        else ('EM limit: ' ~ guard.get('em_reason')) if not guard.get('em_ok')
        else '' %}
-  <form method="post" action="/rga/em" class="line"
-        onsubmit="return confirm('Switch the electron multiplier on? {{ (guard.get('em_reason') or '')|replace("'", '') }}.');">
-    <input type="hidden" name="action" value="on">
-    <button type="submit" class="on" {{ 'disabled' if em_why }}>Switch EM on</button>
-    <span>now: {% if emc and emc.healthy %}<span class="good">off</span>{% else %}<span class="dim">unknown</span>{% endif %}</span>
-  </form>
-  {% endif %}
-  <div class="dim" style="font-size:.85em">
-    {% if em_on %}{{ guard.get('em_reason') }}{% elif em_why %}<span class="{{ 'bad' if 'limit' in em_why else '' }}">{{ em_why }}</span>{% else %}{{ guard.get('em_reason') }}{% endif %}
+  <div class="line">
+    {% if emission_on %}
+    <form method="post" action="/rga/emission">
+      <input type="hidden" name="action" value="off">
+      <button type="submit" class="off" {{ 'disabled' if not ours }}>Switch emission off</button>
+    </form>
+    {% else %}
+    <form method="post" action="/rga/emission"
+          onsubmit="return confirm('Switch the RGA emission on? The filament must be under vacuum. {{ (guard.get('reason') or '')|replace("'", '') }}.');">
+      <input type="hidden" name="action" value="on">
+      <button type="submit" class="on" {{ 'disabled' if not ours or not guard.get('ok') }}>Switch emission on</button>
+    </form>
+    {% endif %}
+    {% if em_on %}
+    <form method="post" action="/rga/em">
+      <input type="hidden" name="action" value="off">
+      <button type="submit" class="off" {{ 'disabled' if not ours }}>Switch EM off</button>
+    </form>
+    {% else %}
+    <form method="post" action="/rga/em"
+          onsubmit="return confirm('Switch the electron multiplier on? {{ (guard.get('em_reason') or '')|replace("'", '') }}.');">
+      <input type="hidden" name="action" value="on">
+      <button type="submit" class="on" {{ 'disabled' if not ours or em_why }}>Switch EM on</button>
+    </form>
+    {% endif %}
   </div>
+  <div style="font-size:.85em;margin-top:.3rem">now: emission
+    {% if em and em.healthy %}{% if emission_on %}<span class="bad">ON</span>{% else %}<span class="good">off</span>{% endif %}{% else %}<span class="dim">unknown</span>{% endif %},
+    EM {% if emc and emc.healthy %}{% if em_on %}<span class="bad">ON</span>{% else %}<span class="good">off</span>{% endif %}{% else %}<span class="dim">unknown</span>{% endif %}
+  </div>
+  {% if ours %}
+  <div class="dim" style="font-size:.85em">
+    {% if not emission_on and not guard.get('ok') %}<span class="bad">{{ guard.get('reason') }}</span>
+    {% elif not em_on and em_why and emission_on %}<span class="{{ 'bad' if 'limit' in em_why else '' }}">{{ em_why }}</span>{% endif %}
+  </div>
+  {% endif %}
   {% if emi.get('note') %}<div class="flash bad" style="margin-top:.4rem">EM {{ emi.get('note') }}</div>{% endif %}
 
   <h3>Scan</h3>
@@ -244,11 +244,6 @@
   </div>
   {% endif %}
 
-  <div class="note" style="margin-top:1rem">Control is given back by itself
-    after five minutes without a scan (not while emission is on), and emission
-    goes off after an hour without a scan or a command, when p105 reaches the
-    limit, on Release and when the service stops. The electron multiplier
-    goes off at its own, lower p105 limit, and always before emission.</div>
 </div>
 
 <div class="card">
@@ -262,13 +257,7 @@
     <label><input type="checkbox" id="labels" checked> molecules</label>
     <span id="plot-note"></span>
   </div>
-  <div class="note" style="margin-top:.8rem">
-    Ion current in ampere: Faraday cup, or the electron multiplier divided by
-    its gain. With emission off a scan measures the
-    detector's noise (about 10⁻¹⁴ A): a background. Nothing is stored unless
-    you press Save; then one file in <code>data/rga/</code> and a summary of a
-    few masses for Grafana.
-  </div>
+
 </div>
 </div>
 

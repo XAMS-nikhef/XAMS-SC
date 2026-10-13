@@ -201,7 +201,7 @@ selection, degas and the ion-source settings stay outside it.
 - this system holds the analyser;
 - the **p105 guard** allows it: `p105` received, quality `ok`, in mbar, at
   most `guard_max_age_s` (30 s) old, and below `guard_limit_mbar`
-  (5 × 10⁻⁴ mbar);
+  (4 × 10⁻⁴ mbar since 13 October 2026, first 5 × 10⁻⁴);
 - the analyser reports no hardware errors;
 - its emission interlock (systemStatus bit 27) is not active.
 
@@ -306,7 +306,8 @@ switches the EM off itself when the total-pressure current exceeds
 - `MMSPControl.set_em(on)`: `generalControl/setEM`, On or Off only, read-back
   polled as for emission. The EM's voltage, gain and conversion stay
   unwritable.
-- **The pressure limit.** `em_guard_limit_mbar` (1 × 10⁻⁵) on the same p105.
+- **The pressure limit.** `em_guard_limit_mbar` (4 × 10⁻⁵; 1 × 10⁻⁵ when first
+  built) on the same p105.
   `_pressure_allows(limit)` is the one check, used by `guard_allows()`
   (emission) and `em_guard_allows()` (EM); `_off_reason(limit)` the one rule
   for going off (at once at the limit; after max age + grace when p105 is
@@ -333,8 +334,15 @@ itself and swaps in the changed parts, keeping typed and ticked inputs; the
 base page's 10 s reload is off for it. The reload made the page jump and
 emptied a half-filled Save form.
 
-**Not yet switched on**: p105 is about 2 × 10⁻⁵ mbar, above the EM limit. The
-first EM run is for the lab, together, once p105 is below 1 × 10⁻⁵: emission
+**Limits revised the same evening** (A.P. Colijn): emission below 4 × 10⁻⁴,
+EM below 4 × 10⁻⁵ mbar - both a little under the hardware limits (5 × 10⁻⁴,
+5 × 10⁻⁵). Page: emission and EM buttons on one row, the state on the line
+under them, no "take control first" notes, the "from another client" box
+beside *Take control*, and the long notes under the controls and the
+spectrum removed.
+
+**Not yet switched on.** With 4 × 10⁻⁵ the EM is allowed at today's p105
+(about 2 × 10⁻⁵ mbar). The first EM run is for the lab, together: emission
 on → EM on → `quick` → Save → EM off → compare with a Faraday `quick`. A gain
 calibration in PV MassSpec (EM vs Faraday on N₂ 28 or Ar 40, then save to the
 device) should come first if absolute EM numbers matter.
@@ -444,16 +452,18 @@ the HTTP equivalent of `*IDN?`.
 - **Emission only from the page's emission button**, with a confirmation.
   Never from a recipe, never from an alarm. The only automatic action is *off*.
 - **p105 guard: the RGA may be operated only with p105 below
-  5 × 10⁻⁴ mbar** (= 3.75 × 10⁻⁴ Torr). A software guard on top of the
+  4 × 10⁻⁴ mbar** (= 3.0 × 10⁻⁴ Torr; `guard_limit_mbar`), a little under the
+  datasheet's 5 × 10⁻⁴ for the Faraday cup; a configured limit above 5 × 10⁻⁴
+  stops the service at start. A software guard on top of the
   analyser's own trip, not an interlock (DESIGN.md §10 rule 1). The service
   subscribes to p105:
     - before emission on: refuse if p105 is missing, stale or at or above the limit;
     - during operation: p105 at or above the limit → emission off at once;
     - p105 stale: a grace period (60 s), then emission off;
     - every guard action audited. Details: [step 3](#what-is-built-step-3-13-october-2026).
-- **EM limit: the electron multiplier only with p105 below 1 × 10⁻⁵ mbar**
-  (`em_guard_limit_mbar`; datasheet maximum with the C-SEM on 5 × 10⁻⁵ hPa,
-  a factor five kept). The same check on the same p105 as for emission - one
+- **EM limit: the electron multiplier only with p105 below 4 × 10⁻⁵ mbar**
+  (`em_guard_limit_mbar`; a little under the datasheet maximum with the C-SEM
+  on, 5 × 10⁻⁵ hPa). The same check on the same p105 as for emission - one
   function, two limits - so freshness, quality, unit and grace are judged
   alike. At the limit the EM goes off at once and emission stays on; the EM
   goes off before emission whatever the reason. A configured limit above the
