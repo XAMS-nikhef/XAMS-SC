@@ -161,7 +161,7 @@ class TestRead:
         values = {m.channel: m.value for m in service.read()}
 
         assert values == {
-            "rga_emission": 0.0, "rga_control": float(CONTROL_NONE),
+            "rga_emission": 0.0, "rga_em": 0.0, "rga_control": float(CONTROL_NONE),
             "rga_status": float(0x01103B90), "rga_hw_errors": 0.0,
             "rga_hw_warnings": 0.0, "rga_tp_trips": 32.0, "rga_box_temp": 35.749,
         }
@@ -230,10 +230,18 @@ class TestPage:
         assert "another client" in body and "PVMassSpec" in body
         assert "0x01103B90" in body and "baseline_correction" in body
 
-    def test_the_page_has_no_electron_multiplier_control(self, client):
-        """Emission yes (step 3); the electron multiplier is a later stage."""
+    def test_the_page_never_reloads_itself_whole(self, client):
+        """A reload emptied the Save form (13 October 2026): the page swaps
+        its changing parts in place instead, and opts out of base.html's."""
+        body = client.get("/rga").text
+        assert "location.reload" not in body
+        assert "rga-controls" in body and "DOMParser" in body
+
+    def test_the_page_switches_the_em_but_sets_nothing_of_it(self, client):
+        """Step 4: EM On/Off yes; its voltage and gain are not on the page."""
         body = client.get("/rga").text.lower()
-        assert "/rga/em\"" not in body and "setem" not in body
+        assert 'action="/rga/em"' in body
+        assert "emvoltage" not in body and "emgain" not in body
 
 
 # ================================================================ step 2
@@ -263,6 +271,9 @@ class FakeAnalyser(MMSPControl):
         # as the device did on 13 October 2026.
         self.emission_lag = 0
         self._lagging = 0
+        self.em = False
+        self.em_interlock = False
+        self.em_equiv = 0
 
     def status(self):
         word = 0x01103B90 | (2 if self.scanning else 0)
@@ -270,6 +281,10 @@ class FakeAnalyser(MMSPControl):
             word |= 1 << 31
         if self.interlock:
             word |= 1 << 27
+        if self.em:
+            word |= 1 << 23
+        if self.em_interlock:
+            word |= 1 << 21
         return word
 
     def _event(self, path, data, name="got"):
@@ -299,6 +314,10 @@ class FakeAnalyser(MMSPControl):
             elif target == "generalControl/setEmission":
                 self.emission = query == "On"
                 self._lagging = self.emission_lag
+                if not self.emission:
+                    self.em = False        # the device stops the EM with emission
+            elif target == "generalControl/setEM":
+                self.em = query == "On"
             return self._event(path, query, "wasSet")
         target = path[len("/mmsp/"):-len("/get")]
         if target == "communication/controlInfo":
@@ -317,10 +336,15 @@ class FakeAnalyser(MMSPControl):
                 self._lagging -= 1
                 return self._event(path, "Off" if self.emission else "On")
             return self._event(path, "On" if self.emission else "Off")
+        if target == "generalControl/setEM":
+            return self._event(path, "On" if self.em else "Off")
         extra = {"sensorIonSource/emissionCurrent": 2000,
+                 "sensorDetector/emVoltage": 800,
+                 "sensorDetector/emGain": 1234.57,
+                 "sensorDetector/emGainMass": 2800,
+                 "generalControl/emEquivIonSet": self.em_equiv,
                  "sensorIonSource/electronEnergy": 70,
                  "sensorIonSource/ppSensitivityFactor": 0.000793007,
-                 "generalControl/setEM": "Off",
                  "measurement/totalPressure": 0}
         if target in extra:
             return self._event(path, extra[target])
@@ -369,12 +393,15 @@ def acquire(service, recipe="quick"):
 
 
 class TestTheWhitelist:
-    def test_only_emission_is_writable_among_the_instrument_settings(self):
-        assert [t for t in WRITABLE if t.startswith(
+    def test_only_emission_and_em_are_writable_among_the_instrument_settings(self):
+        assert sorted(t for t in WRITABLE if t.startswith(
             ("generalControl", "sensorIonSource", "sensorDetector", "digital",
-             "analog", "userDB", "system"))] == ["generalControl/setEmission"]
+             "analog", "userDB", "system"))) == ["generalControl/setEM",
+                                                 "generalControl/setEmission"]
 
-    @pytest.mark.parametrize("target", ["generalControl/setEM",
+    @pytest.mark.parametrize("target", ["sensorDetector/emVoltage",
+                                        "sensorDetector/emGain",
+                                        "generalControl/emEquivIonSet",
                                         "generalControl/degas",
                                         "sensorIonSource/emissionCurrent",
                                         "sensorIonSource/filamentSelected"])
@@ -384,11 +411,13 @@ class TestTheWhitelist:
             device._set(target, {"v": "On"})
         assert device.sets == []
 
+    @pytest.mark.parametrize("target", ["generalControl/setEmission",
+                                        "generalControl/setEM"])
     @pytest.mark.parametrize("value", ["Standby", "on", "1", "Degas"])
-    def test_emission_takes_on_or_off_and_nothing_else(self, value):
+    def test_emission_and_em_take_on_or_off_and_nothing_else(self, target, value):
         device = FakeAnalyser("x")
         with pytest.raises(PermissionError):
-            device._set("generalControl/setEmission", {"v": value})
+            device._set(target, {"v": value})
         assert device.sets == []
 
     def test_an_unlisted_field_of_a_listed_target_is_refused(self):
@@ -930,3 +959,201 @@ class TestPeakWindow:
     def test_69_is_a_summary_mass(self):
         from xams_sc.devices.rga import SUMMARY_MASSES
         assert 69 in SUMMARY_MASSES
+
+
+# ================================================================ step 4
+#
+# The electron multiplier: its own, lower p105 limit (em_guard_limit_mbar,
+# 1e-5; datasheet maximum 5e-5), only with emission on, never mid-scan, and
+# always off before emission.
+
+def em(service, action):
+    return command(service, "_handle_em", "xams/ack/rga/em", action=action)
+
+
+def emission_held(monkeypatch, tmp_path, analyser, p=5e-6):
+    service = holding(monkeypatch, tmp_path, analyser, p=p)
+    assert emission(service, "on")["ok"]
+    service.read()
+    return service
+
+
+def em_running(monkeypatch, tmp_path, analyser):
+    service = emission_held(monkeypatch, tmp_path, analyser)
+    assert em(service, "on")["ok"]
+    service.read()
+    assert service.em_is_on()
+    return service
+
+
+class TestEmLimitConfiguration:
+    @pytest.mark.parametrize("limit", [6e-5, 1e-3, 0, -1e-6])
+    def test_a_limit_above_the_datasheet_or_not_positive_is_refused(
+            self, monkeypatch, tmp_path, limit):
+        config = load()
+        config.devices["rga"] = dict(config.devices["rga"], em_guard_limit_mbar=limit,
+                                     data_dir=str(tmp_path / "rga"))
+        monkeypatch.setattr(rga, "ROOT", pathlib.Path("/"))
+        with pytest.raises(ValueError, match="em_guard_limit_mbar"):
+            RgaService(config, RecordingBus(), lock_dir=pathlib.Path(tempfile.mkdtemp()))
+
+    def test_a_limit_above_the_emission_limit_is_refused(self, monkeypatch, tmp_path):
+        config = load()
+        config.devices["rga"] = dict(config.devices["rga"], guard_limit_mbar=2e-5,
+                                     em_guard_limit_mbar=3e-5,
+                                     data_dir=str(tmp_path / "rga"))
+        monkeypatch.setattr(rga, "ROOT", pathlib.Path("/"))
+        with pytest.raises(ValueError, match="emission limit"):
+            RgaService(config, RecordingBus(), lock_dir=pathlib.Path(tempfile.mkdtemp()))
+
+    def test_the_configured_limit(self, config):
+        assert config.devices["rga"]["em_guard_limit_mbar"] == pytest.approx(1e-5)
+
+
+class TestEmOn:
+    def test_with_emission_on_and_p105_below_its_limit_it_goes_on(
+            self, monkeypatch, tmp_path, analyser):
+        service = emission_held(monkeypatch, tmp_path, analyser)
+        ack = em(service, "on")
+        assert ack["ok"] and "5.00e-06" in ack["detail"], ack
+        assert analyser["device"].em
+        service.read()
+        info = service.bus.last_json("xams/rga/info")
+        assert info["em"]["on"] and info["em"]["gain"] == 1234.57
+        assert service.bus.last_json("xams/audit")["action"] == "rga_em_on"
+
+    def test_between_the_two_limits_emission_yes_em_no(self, monkeypatch, tmp_path, analyser):
+        """p105 = 2e-5 mbar, as on 13 October 2026: fine for emission, too
+        high for the EM."""
+        service = emission_held(monkeypatch, tmp_path, analyser, p=2e-5)
+        ack = em(service, "on")
+        assert not ack["ok"] and "EM limit" in ack["reason"] and "1.0e-05" in ack["reason"]
+        assert not analyser["device"].em
+        guard = service.bus.last_json("xams/rga/info")["guard"]
+        assert guard["ok"] and not guard["em_ok"]
+
+    def test_at_exactly_the_limit_it_is_refused(self, monkeypatch, tmp_path, analyser):
+        service = emission_held(monkeypatch, tmp_path, analyser, p=1e-5)
+        assert not em(service, "on")["ok"]
+
+    def test_not_with_emission_off(self, monkeypatch, tmp_path, analyser):
+        service = holding(monkeypatch, tmp_path, analyser, p=5e-6)
+        ack = em(service, "on")
+        assert not ack["ok"] and "emission is off" in ack["reason"]
+
+    def test_not_without_control(self, monkeypatch, tmp_path, analyser):
+        service = running(monkeypatch, tmp_path, analyser)
+        p105(service, 5e-6)
+        ack = em(service, "on")
+        assert not ack["ok"] and "take control first" in ack["reason"]
+
+    def test_not_with_a_stale_p105(self, monkeypatch, tmp_path, analyser):
+        service = emission_held(monkeypatch, tmp_path, analyser)
+        service._guard_seen -= 31
+        ack = em(service, "on")
+        assert not ack["ok"] and "old" in ack["reason"]
+
+    def test_not_during_a_scan(self, monkeypatch, tmp_path, analyser):
+        service = emission_held(monkeypatch, tmp_path, analyser)
+        assert command(service, "_handle_scan", "xams/ack/rga/scan",
+                       action="start", recipe="survey")["ok"]
+        ack = em(service, "on")
+        assert not ack["ok"] and "scan is running" in ack["reason"]
+
+    def test_not_with_the_em_interlock(self, monkeypatch, tmp_path, analyser):
+        service = emission_held(monkeypatch, tmp_path, analyser)
+        analyser["device"].em_interlock = True
+        service.read()
+        ack = em(service, "on")
+        assert not ack["ok"] and "EM interlock" in ack["reason"]
+
+
+class TestEmOff:
+    def test_p105_reaching_the_em_limit_switches_only_the_em_off(
+            self, monkeypatch, tmp_path, analyser):
+        service = em_running(monkeypatch, tmp_path, analyser)
+        p105(service, 2e-5)
+        service.read()
+        device = analyser["device"]
+        assert not device.em and device.emission
+        assert "guard" in service.bus.last_json("xams/rga/info")["em"]["note"]
+
+    def test_a_stale_p105_is_given_the_same_grace(self, monkeypatch, tmp_path, analyser):
+        service = em_running(monkeypatch, tmp_path, analyser)
+        service._guard_seen -= 31 + 30
+        service.read()
+        assert analyser["device"].em
+        service._guard_seen -= 31
+        service.read()
+        assert not analyser["device"].em
+
+    def test_emission_off_from_the_page_takes_the_em_off_first(
+            self, monkeypatch, tmp_path, analyser):
+        service = em_running(monkeypatch, tmp_path, analyser)
+        assert emission(service, "off")["ok"]
+        sets = analyser["device"].sets
+        assert sets.index("/mmsp/generalControl/setEM/set?Off") < \
+            sets.index("/mmsp/generalControl/setEmission/set?Off")
+
+    def test_the_emission_guard_takes_the_em_off_first(self, monkeypatch, tmp_path, analyser):
+        service = em_running(monkeypatch, tmp_path, analyser)
+        p105(service, 7e-4)
+        service.read()
+        sets = analyser["device"].sets
+        assert sets.index("/mmsp/generalControl/setEM/set?Off") < \
+            sets.index("/mmsp/generalControl/setEmission/set?Off")
+
+    def test_release_takes_the_em_off(self, monkeypatch, tmp_path, analyser):
+        service = em_running(monkeypatch, tmp_path, analyser)
+        assert command(service, "_handle_control", "xams/ack/rga/control",
+                       action="release")["ok"]
+        assert not analyser["device"].em and not analyser["device"].emission
+
+    def test_a_stopping_service_takes_the_em_off(self, monkeypatch, tmp_path, analyser):
+        service = em_running(monkeypatch, tmp_path, analyser)
+        device = analyser["device"]
+        service.close()
+        assert not device.em and not device.emission
+
+    def test_off_from_the_page(self, monkeypatch, tmp_path, analyser):
+        service = em_running(monkeypatch, tmp_path, analyser)
+        assert em(service, "off")["ok"]
+        assert not analyser["device"].em and analyser["device"].emission
+
+
+class TestEmAcquisition:
+    def test_a_scan_with_the_em_is_marked_and_saved_as_such(
+            self, monkeypatch, tmp_path, analyser):
+        service = em_running(monkeypatch, tmp_path, analyser)
+        assert command(service, "_handle_scan", "xams/ack/rga/scan",
+                       action="start", recipe="quick")["ok"]
+        for _ in range(5):
+            service.read()
+        assert service.bus.last_json("xams/rga/scan")["gain"] == 1234.57
+        assert command(service, "_handle_save", "xams/ack/rga/save", comment="em")["ok"]
+        (path,) = rga_file.files(tmp_path / "rga")
+        record = rga_file.load_rga(path)
+        assert record["detector"] == "EM" and record["device"]["em_gain"] == 1234.57
+
+    def test_the_em_going_off_mid_scan_ends_the_acquisition(
+            self, monkeypatch, tmp_path, analyser):
+        service = em_running(monkeypatch, tmp_path, analyser)
+        assert command(service, "_handle_scan", "xams/ack/rga/scan",
+                       action="start", recipe="quick")["ok"]
+        analyser["device"].queue = []          # running, no scan finished yet
+        p105(service, 2e-5)
+        service.read()
+        acq = service.bus.last_json("xams/rga/info")["acquisition"]
+        assert acq["state"] == "stopped" and "EM switched off" in acq["error"]
+
+    def test_the_summary_is_on_the_ion_current_scale(self):
+        recipe = {"name": "x", "channels": [{"mode": "single", "mass": 28, "dwell": 32}]}
+        base = {"t_saved": "2026-10-13T20:00:00Z", "file": "f.json", "recipe": recipe,
+                "mean": [1234.57e-12], "device": {"em_gain": 1234.57, "em_equiv_ion": 0}}
+        em_rec = rga_file.summary(base | {"detector": "EM"}, [28])
+        assert em_rec["peaks"][0]["current_a"] == pytest.approx(1e-12)
+        fc = rga_file.summary(base | {"detector": "Faraday"}, [28])
+        assert fc["peaks"][0]["current_a"] == pytest.approx(1234.57e-12)
+        converted = rga_file.summary(
+            base | {"detector": "EM", "device": {"em_gain": 1234.57, "em_equiv_ion": 1}}, [28])
+        assert converted["peaks"][0]["current_a"] == pytest.approx(1234.57e-12)

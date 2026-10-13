@@ -42,15 +42,16 @@ import time
 from datetime import datetime
 
 from .. import rga_file
-from ..bus import (ACK_RGA_CONTROL, ACK_RGA_EMISSION, ACK_RGA_SAVE, ACK_RGA_SCAN,
-                   TOPIC_AUDIT, TOPIC_MEAS, TOPIC_RGA_CONTROL, TOPIC_RGA_EMISSION,
+from ..bus import (ACK_RGA_CONTROL, ACK_RGA_EM, ACK_RGA_EMISSION, ACK_RGA_SAVE,
+                   ACK_RGA_SCAN, TOPIC_AUDIT, TOPIC_MEAS, TOPIC_RGA_CONTROL,
+                   TOPIC_RGA_EM, TOPIC_RGA_EMISSION,
                    TOPIC_RGA_INFO, TOPIC_RGA_SAVE, TOPIC_RGA_SAVED, TOPIC_RGA_SCAN,
                    TOPIC_RGA_SCANDATA)
 from ..config import CONFIG_DIR, ROOT, Config
 from ..model import Measurement, Quality, iso, utcnow
 from ..service import BaseService
-from .prismapro import (TO_MBAR, ControlRefused, MMSPControl, MMSPError,
-                        emission_on, read_identity)
+from .prismapro import (EM_INTERLOCK_BIT, EM_PENDING_BIT, TO_MBAR, ControlRefused,
+                        MMSPControl, MMSPError, em_on, emission_on, read_identity)
 
 log = logging.getLogger(__name__)
 
@@ -59,6 +60,10 @@ CONTROL_NONE, CONTROL_US, CONTROL_OTHER = 0, 1, 2
 
 SCANNING_BIT = 1 << 1
 INTERLOCK_BIT = 1 << 27
+# The datasheet's maximum operating pressure with the C-SEM (electron
+# multiplier) on: 5e-5 hPa = mbar (QMG 250 M, "Technical data"; Faraday:
+# 5e-4). The configured EM limit may be lower, never higher.
+EM_DATASHEET_MAX_MBAR = 5e-5
 # 69 is CF3+, the largest of the fluorocarbon (PTFE) series seen on
 # 13 October 2026; it tells whether a peak at 131 is C3F5+ rather than Xe.
 SUMMARY_MASSES = [2, 4, 18, 28, 32, 40, 44, 69, 129, 132]
@@ -76,6 +81,7 @@ def _control_code(info: dict) -> int:
 # channels may share one target; it is read once per cycle.
 READERS = {
     "emission": ("status/systemStatus", lambda d: float(emission_on(int(d)))),
+    "em": ("status/systemStatus", lambda d: float(em_on(int(d)))),
     "status/systemStatus": ("status/systemStatus", lambda d: float(int(d))),
     "status/hardwareErrors": ("status/hardwareErrors", lambda d: float(int(d))),
     "status/hardwareWarnings": ("status/hardwareWarnings", lambda d: float(int(d))),
@@ -93,6 +99,10 @@ SETTINGS = {
     "pp_sensitivity_a_per_unit": "sensorIonSource/ppSensitivityFactor",
     "tp_units_code": "sensorIonSource/tPunits",
     "em_state": "generalControl/setEM",
+    "em_voltage_v": "sensorDetector/emVoltage",
+    "em_gain": "sensorDetector/emGain",
+    "em_gain_mass_camu": "sensorDetector/emGainMass",
+    "em_equiv_ion": "generalControl/emEquivIonSet",
     "emission_state": "generalControl/setEmission",
     "total_pressure": "measurement/totalPressure",
 }
@@ -146,6 +156,20 @@ class RgaService(BaseService):
         self._status_word: int | None = None      # systemStatus, last read
         self._hw_errors: int | None = None
         self._emission_note: str | None = None    # why emission last went off by itself
+
+        # The electron multiplier's own, lower, limit on the same p105 (step
+        # 4). Same freshness rules and grace as the emission guard. A limit
+        # above the datasheet's or above the emission limit is a
+        # configuration error, refused at start rather than clipped.
+        self._em_limit = float(self._spec.get("em_guard_limit_mbar", 1e-5))
+        if not 0 < self._em_limit <= min(EM_DATASHEET_MAX_MBAR, self._guard_limit):
+            raise ValueError(
+                f"devices.yaml rga.em_guard_limit_mbar = {self._em_limit:g}: must be "
+                f"above 0 and at most {min(EM_DATASHEET_MAX_MBAR, self._guard_limit):g} "
+                f"mbar (datasheet {EM_DATASHEET_MAX_MBAR:g}, emission limit "
+                f"{self._guard_limit:g})")
+        self._em_note: str | None = None          # why the EM last went off by itself
+        self._em_settings: dict = {}              # voltage, gain, as last read
 
         # Commands run on a worker thread, never on the MQTT thread: an
         # analyser call takes up to seconds, and the MQTT thread is the one
@@ -223,10 +247,22 @@ class RgaService(BaseService):
             self._load_recipes(ident.mass_range)
         self._client = client
         self._identity = ident.as_dict() | {"host": host}
+        self._read_em_settings()
         self._publish_info()
         if self._acq is not None and self._acq.get("scans"):
             self._publish_scan(self._acq)       # the restored one, for the plot
         return True
+
+    def _read_em_settings(self) -> None:
+        """The EM's voltage and gain, for the page. Read, never written."""
+        try:
+            self._em_settings = {
+                "voltage_v": self._client.get("sensorDetector/emVoltage"),
+                "gain": self._client.get("sensorDetector/emGain"),
+                "gain_mass_camu": self._client.get("sensorDetector/emGainMass"),
+                "equiv_ion": self._client.get("generalControl/emEquivIonSet")}
+        except (OSError, MMSPError) as exc:
+            log.warning("could not read the EM settings: %s", exc)
 
     def reconnect(self) -> bool:
         if self.simulate:
@@ -258,6 +294,7 @@ class RgaService(BaseService):
         self._note_control(control)
 
         self._collect_scans()
+        self._watch_em(control)
         self._watch_emission(control)
         self._release_if_idle(control)
         # Every cycle, not only on a change: the guard's p105 and its age are
@@ -302,6 +339,10 @@ class RgaService(BaseService):
                   "emission": {"on": self.emission_is_on(),
                                "interlock": bool((self._status_word or 0) & INTERLOCK_BIT),
                                "note": self._emission_note},
+                  "em": {"on": self.em_is_on(),
+                         "pending": bool((self._status_word or 0) & EM_PENDING_BIT),
+                         "interlock": bool((self._status_word or 0) & EM_INTERLOCK_BIT),
+                         "note": self._em_note, **self._em_settings},
                   "guard": self.guard_view()}
         self.bus.publish_raw(TOPIC_RGA_INFO, json.dumps(record), retain=True)
 
@@ -311,7 +352,8 @@ class RgaService(BaseService):
             return None
         return {"recipe": a["recipe"]["name"], "state": a["state"],
                 "done": len(a["scans"]), "of": a["count"], "t_start": a["t_start"],
-                "by": a["by"], "saved": a.get("saved"), "error": a.get("error")}
+                "by": a["by"], "saved": a.get("saved"), "error": a.get("error"),
+                "detector": a.get("detector", "Faraday")}
 
     # ------------------------------------------------------------- scans
 
@@ -398,7 +440,14 @@ class RgaService(BaseService):
                        "scannum": last["scannum"], "done": len(acq["scans"]),
                        "of": acq["count"], "masses": acq["masses"],
                        "values": last["values"],
-                       "mean": rga_file.mean([s["values"] for s in acq["scans"]])}
+                       "mean": rga_file.mean([s["values"] for s in acq["scans"]]),
+                       "detector": acq.get("detector", "Faraday")}
+        # The factor the values are above ion current, for the plot: the
+        # same rule as for a saved file (rga_file.em_gain).
+        payload["gain"] = rga_file.em_gain(
+            {"detector": payload["detector"],
+             "device": {"em_gain": self._em_settings.get("gain"),
+                        "em_equiv_ion": self._em_settings.get("equiv_ion")}})
         self.bus.publish_raw(TOPIC_RGA_SCANDATA, json.dumps(payload), retain=True)
         if acq["state"] == "scanning":
             self._persist(acq)
@@ -431,18 +480,26 @@ class RgaService(BaseService):
         Not what was last asked for - the regulator takes seconds to follow."""
         return self._status_word is not None and emission_on(self._status_word)
 
+    def em_is_on(self) -> bool:
+        """The REAL EM state: systemStatus bit 23, as last read."""
+        return self._status_word is not None and em_on(self._status_word)
+
     def guard_view(self) -> dict:
-        """p105 as the guard sees it: value, age, and whether emission may go on."""
+        """p105 as the guard sees it: value, age, and whether emission and
+        the EM may go on."""
         snap = self._snapshot.get(self._guard_channel) or {}
         age = (time.monotonic() - self._guard_seen) if self._guard_seen else None
         ok, reason = self.guard_allows()
+        em_ok, em_reason = self.em_guard_allows()
         return {"channel": self._guard_channel, "value": snap.get("v"),
                 "unit": snap.get("u"), "quality": snap.get("q"),
                 "age_s": None if age is None else round(age, 1),
-                "limit_mbar": self._guard_limit, "ok": ok, "reason": reason}
+                "limit_mbar": self._guard_limit, "ok": ok, "reason": reason,
+                "em_limit_mbar": self._em_limit, "em_ok": em_ok, "em_reason": em_reason}
 
-    def guard_allows(self) -> tuple[bool, str]:
-        """May emission be on, as far as p105 is concerned?"""
+    def _pressure_allows(self, limit: float) -> tuple[bool, str]:
+        """Is p105 fresh, good, in mbar and below `limit`? One check for both
+        limits, so emission and the EM cannot drift apart in how they judge."""
         snap = self._snapshot.get(self._guard_channel)
         name = self._guard_channel
         if not snap or self._guard_seen is None:
@@ -454,10 +511,67 @@ class RgaService(BaseService):
             return False, f"{name} quality is {snap.get('q')}"
         if snap.get("u") not in (None, "mbar"):
             return False, f"{name} is in {snap.get('u')}, the guard expects mbar"
-        if snap["v"] >= self._guard_limit:
+        if snap["v"] >= limit:
             return False, (f"{name} = {snap['v']:.2e} mbar, at or above the limit "
-                           f"{self._guard_limit:.1e} mbar")
-        return True, f"{name} = {snap['v']:.2e} mbar < {self._guard_limit:.1e} mbar"
+                           f"{limit:.1e} mbar")
+        return True, f"{name} = {snap['v']:.2e} mbar < {limit:.1e} mbar"
+
+    def guard_allows(self) -> tuple[bool, str]:
+        """May emission be on, as far as p105 is concerned?"""
+        return self._pressure_allows(self._guard_limit)
+
+    def em_guard_allows(self) -> tuple[bool, str]:
+        """May the EM be on, as far as p105 is concerned? Its own, lower limit."""
+        return self._pressure_allows(self._em_limit)
+
+    def _off_reason(self, limit: float) -> str | None:
+        """Why something guarded by `limit` must go off now, or None: at once
+        at the limit; when p105 is missing, old or bad, only after the grace."""
+        ok, why = self._pressure_allows(limit)
+        if ok:
+            return None
+        snap = self._snapshot.get(self._guard_channel) or {}
+        if isinstance(snap.get("v"), (int, float)) and snap["v"] >= limit:
+            return f"guard: {why}"
+        age = (time.monotonic() - self._guard_seen) if self._guard_seen else None
+        if age is None or age > self._guard_max_age + self._guard_grace:
+            return f"guard: {why}, past the grace period"
+        return None
+
+    def _em_off(self, reason: str, actor: str = "rga service") -> bool:
+        """Switch the EM off and say why. True if the analyser took it."""
+        try:
+            self._client.set_em(False)
+        except (OSError, MMSPError) as exc:
+            log.error("COULD NOT SWITCH THE RGA EM OFF (%s): %s", reason, exc)
+            return False
+        if actor == "rga service":
+            self._em_note = f"switched off by the service at {iso(utcnow())}: {reason}"
+            log.warning("RGA EM switched OFF by the service: %s", reason)
+        self._audit("rga_em_off", "rga", "On", "Off", "ok", reason, actor)
+        with self._acq_lock:
+            acq = self._acq
+            scanning = acq is not None and acq["state"] == "scanning"
+        if scanning and acq.get("detector") == "EM":
+            # One detector per acquisition: the scans so far are EM scans, and
+            # stay saveable; the rest would not be.
+            try:
+                self._client.stop_scan()
+            except (OSError, MMSPError) as exc:
+                log.warning("could not stop the scan after the EM went off: %s", exc)
+            self._finish(acq, "stopped", f"stopped: EM switched off ({reason})")
+        return True
+
+    def _watch_em(self, control: dict) -> None:
+        """Switch the EM off when it must not stay on. Only ever OFF, and only
+        while this system holds the analyser (as for emission)."""
+        if not self.em_is_on() or not control.get("amInControl"):
+            return
+        reason = self._off_reason(self._em_limit)
+        if reason is None and not self.emission_is_on():
+            reason = "emission is off"
+        if reason is not None:
+            self._em_off(reason)
 
     def _watch_emission(self, control: dict) -> None:
         """Switch emission off when it must not stay on. Only ever OFF.
@@ -468,15 +582,8 @@ class RgaService(BaseService):
         """
         if not self.emission_is_on() or not control.get("amInControl"):
             return
-        reason = None
-        ok, why = self.guard_allows()
-        age = (time.monotonic() - self._guard_seen) if self._guard_seen else None
-        snap = self._snapshot.get(self._guard_channel) or {}
-        if isinstance(snap.get("v"), (int, float)) and snap["v"] >= self._guard_limit:
-            reason = f"guard: {why}"                       # at once, no grace
-        elif not ok and (age is None or age > self._guard_max_age + self._guard_grace):
-            reason = f"guard: {why}, past the grace period"
-        else:
+        reason = self._off_reason(self._guard_limit)
+        if reason is None:
             with self._acq_lock:
                 busy = self._acq is not None and self._acq["state"] == "scanning"
                 idle = time.monotonic() - self._last_activity
@@ -485,6 +592,8 @@ class RgaService(BaseService):
                           f"(limit {self._emission_idle_off_s / 60:.0f} min)")
         if reason is None:
             return
+        if self.em_is_on():
+            self._em_off(f"before emission off: {reason}")
         try:
             self._client.set_emission(False)
         except (OSError, MMSPError) as exc:
@@ -554,6 +663,8 @@ class RgaService(BaseService):
                     self._client.stop_scan()
                     self._finish(self._acq, "stopped", "stopped: control released")
                 detail = "released"
+                if self.em_is_on():
+                    self._em_off("before releasing control", actor)
                 if self.emission_is_on():
                     # Never leave emission on behind a released analyser:
                     # nothing could switch it off then.
@@ -623,7 +734,8 @@ class RgaService(BaseService):
         new = {"recipe": recipe, "count": recipe["scans"], "scans": [],
                "points": sum(rga_file.points(c) for c in recipe["channels"]),
                "masses": rga_file.masses(recipe), "t_start": iso(utcnow()),
-               "mono_start": time.monotonic(), "state": "scanning", "by": actor}
+               "mono_start": time.monotonic(), "state": "scanning", "by": actor,
+               "detector": "EM" if self.em_is_on() else "Faraday"}
         with self._acq_lock:
             self._acq = new
         self.interval_s = self._scan_interval
@@ -670,6 +782,7 @@ class RgaService(BaseService):
             "background": (str(d.get("background")).strip() or None)
                           if d.get("background") else None,
             "operator": actor, "units": "A",
+            "detector": acq.get("detector", "Faraday"),
             "scans": scans, "mean": rga_file.mean([s["values"] for s in scans]),
         }
         try:
@@ -721,6 +834,8 @@ class RgaService(BaseService):
                           "the analyser's emission interlock is active")
                 return
         old = "On" if self.emission_is_on() else "Off"
+        if what == "off" and self.em_is_on():
+            self._em_off("before emission off", actor)
         try:
             asked = self._client.set_emission(what == "on")
         except (OSError, MMSPError, PermissionError) as exc:
@@ -746,6 +861,67 @@ class RgaService(BaseService):
                   f"emission {want} requested; the analyser takes a few seconds to follow"
                   + (f" ({self.guard_allows()[1]})" if want == "On" else ""),
                   old=old, new=want)
+
+    def _handle_em(self, topic: str, payload: str) -> None:
+        """Electron multiplier On or Off, from the page (step 4). On only past
+        every check; the pressure limit is the EM's own, lower one."""
+        d, actor = self._parse(payload)
+        what = str(d.get("action", "")).lower()
+        action = "rga_em_" + (what or "unknown")
+        if what not in ("on", "off"):
+            self._ack(ACK_RGA_EM, False, action, actor, "action must be on or off")
+            return
+        if not self._usable(ACK_RGA_EM, action, actor):
+            return
+        if not (self._control or {}).get("us"):
+            self._ack(ACK_RGA_EM, False, action, actor,
+                      "this system does not hold the analyser; take control first")
+            return
+        with self._acq_lock:
+            self._last_activity = time.monotonic()
+            scanning = self._acq is not None and self._acq["state"] == "scanning"
+        if what == "on":
+            word = self._status_word or 0
+            checks = [
+                (scanning, "a scan is running; one detector per acquisition - "
+                           "switch the EM between scans"),
+                (not self.emission_is_on(), "emission is off; switch emission on first"),
+                (bool(self._hw_errors),
+                 f"the analyser reports hardware errors 0x{self._hw_errors or 0:08X}"),
+                (bool(word & EM_INTERLOCK_BIT), "the analyser's EM interlock is active"),
+            ]
+            for failed, why in checks:
+                if failed:
+                    self._ack(ACK_RGA_EM, False, action, actor, why)
+                    return
+            ok, why = self.em_guard_allows()
+            if not ok:
+                self._ack(ACK_RGA_EM, False, action, actor, f"EM limit: {why}")
+                return
+        old = "On" if self.em_is_on() else "Off"
+        want = "On" if what == "on" else "Off"
+        if what == "off":
+            if not self._em_off("switched off from the page", actor):
+                self._ack(ACK_RGA_EM, False, action, actor,
+                          "the analyser did not take the request; see the log")
+                return
+            self._ack(ACK_RGA_EM, True, action, actor,
+                      "EM off requested; the analyser takes a few seconds to follow",
+                      old=old, new=want)
+            return
+        try:
+            asked = self._client.set_em(True)
+        except (OSError, MMSPError, PermissionError) as exc:
+            self._ack(ACK_RGA_EM, False, action, actor, f"the analyser said: {exc}")
+            return
+        self._em_note = None
+        why = self.em_guard_allows()[1]
+        log.warning("RGA EM On requested by %s (%s)", actor, why)
+        detail = (f"EM on requested ({why}); the analyser takes a few seconds to follow"
+                  if asked == want else
+                  f"EM on requested and accepted, but the analyser's read-back still "
+                  f"says {asked}; check the EM state in a few seconds ({why})")
+        self._ack(ACK_RGA_EM, True, action, actor, detail, old=old, new=want)
 
     def _read_settings(self) -> dict:
         out = dict(self._identity or {})
@@ -793,6 +969,7 @@ class RgaService(BaseService):
         self.bus.subscribe(TOPIC_RGA_SCAN, self._enqueue(self._handle_scan))
         self.bus.subscribe(TOPIC_RGA_SAVE, self._enqueue(self._handle_save))
         self.bus.subscribe(TOPIC_RGA_EMISSION, self._enqueue(self._handle_emission))
+        self.bus.subscribe(TOPIC_RGA_EM, self._enqueue(self._handle_em))
         for ch in dict.fromkeys(self._snapshot_channels + [self._guard_channel]):
             self.bus.subscribe(f"{TOPIC_MEAS}/{ch}", self._on_snapshot)
         worker = threading.Thread(target=self._work, name="rga-commands", daemon=True)
@@ -824,8 +1001,8 @@ class RgaService(BaseService):
             self._client = None
 
     def close(self) -> None:
-        """On shutdown: stop a running scan, switch emission off, give control
-        back, then close.
+        """On shutdown: stop a running scan, switch the EM and emission off,
+        give control back, then close.
 
         A service that stops while holding the analyser would lock PV MassSpec
         out for the device's own timeout - minutes, for nothing. Emission left
@@ -840,6 +1017,11 @@ class RgaService(BaseService):
                 info = self._client.get("communication/controlInfo") or {}
                 if info.get("amInControl"):
                     status = int(self._client.get("status/systemStatus"))
+                    if em_on(status):
+                        self._client.set_em(False)
+                        log.warning("RGA EM switched off on shutdown")
+                        self._audit("rga_em_off", "rga", "On", "Off", "ok",
+                                    "switched off: service stopping", "rga service")
                     if emission_on(status):
                         self._client.set_emission(False)
                         log.warning("RGA emission switched off on shutdown")

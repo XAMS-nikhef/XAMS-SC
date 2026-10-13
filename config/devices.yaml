@@ -151,6 +151,14 @@ rga:
   guard_max_age_s: 30
   guard_grace_s: 60
   emission_idle_off_s: 3600
+  # The ELECTRON MULTIPLIER's own limit on the same p105 (step 4). EM On is
+  # refused unless emission is on and p105 is fresh and below it; the service
+  # switches the EM Off at once at the limit, after the same grace when p105
+  # stops arriving, and always before emission goes off. Datasheet maximum
+  # with the C-SEM on: 5e-5 mbar; 1e-5 keeps a factor five. The service
+  # refuses to start with a value above 5e-5 or above guard_limit_mbar.
+  # A.P. Colijn, 13 October 2026.
+  em_guard_limit_mbar: 1.0e-5
   # Control is given back after this long without a scan or a command (not
   # while emission is on).
   release_idle_s: 300

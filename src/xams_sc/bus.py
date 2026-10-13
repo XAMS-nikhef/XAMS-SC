@@ -127,6 +127,10 @@ ACK_RGA_SAVE = "xams/ack/rga/save"
 # analyser's own state; the service's only automatic action is Off.
 TOPIC_RGA_EMISSION = "xams/cmd/rga/emission"
 ACK_RGA_EMISSION = "xams/ack/rga/emission"
+# Electron multiplier On or Off (step 4). On only with emission on and past
+# the EM's own, lower p105 limit; the service's only automatic action is Off.
+TOPIC_RGA_EM = "xams/cmd/rga/em"
+ACK_RGA_EM = "xams/ack/rga/em"
 
 # The latest scan of the running acquisition, RETAINED, for the live plot.
 # Outside xams/meas: a spectrum is never archived from the bus - only a Save

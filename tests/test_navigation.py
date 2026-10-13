@@ -33,8 +33,9 @@ INSTRUMENT_WRITES = ('action="/hv/apply"', 'action="/hv/output"',
 
 #: The RGA's writes, which live on its own page by design: take it, scan,
 #: look at the spectrum, save, give it back is one workflow around one plot
-#: (docs/drivers/rga.md). None of them reaches emission.
-RGA_WRITES = ('action="/rga/control"', 'action="/rga/scan"')
+#: (docs/drivers/rga.md), with emission and the electron multiplier.
+RGA_WRITES = ('action="/rga/control"', 'action="/rga/scan"', 'action="/rga/emission"',
+              'action="/rga/em"')
 
 PAGES = ("/", "/status", "/hv", "/hv/defaults", "/rga", "/system", "/alarms", "/logs")
 

@@ -550,6 +550,8 @@ channels:
   # ------------------------------------------------------------------
   - {name: rga_emission, device: rga, phys: emission, kind: status, unit: bool, on_pid: false,
      description: "RGA emission on (systemStatus bit 31 or 30)"}
+  - {name: rga_em, device: rga, phys: em, kind: status, unit: bool, on_pid: false,
+     description: "RGA electron multiplier on (systemStatus bit 23)"}
   - {name: rga_control, device: rga, phys: control, kind: status, unit: code, on_pid: false,
      description: "RGA control: 0 nobody, 1 this system, 2 another client (PV MassSpec, web UI); who on the RGA page"}
   - {name: rga_status, device: rga, phys: status/systemStatus, kind: status, unit: bits, on_pid: false,

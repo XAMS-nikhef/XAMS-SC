@@ -46,8 +46,8 @@ from fastapi.responses import (HTMLResponse, JSONResponse, PlainTextResponse,
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from ..bus import (ACK_RGA_CONTROL, ACK_RGA_EMISSION, ACK_RGA_SAVE, ACK_RGA_SCAN,
-                   TOPIC_RGA_CONTROL, TOPIC_RGA_EMISSION, TOPIC_RGA_SAVE, TOPIC_RGA_SCAN,
+from ..bus import (ACK_RGA_CONTROL, ACK_RGA_EM, ACK_RGA_EMISSION, ACK_RGA_SAVE, ACK_RGA_SCAN,
+                   TOPIC_RGA_CONTROL, TOPIC_RGA_EM, TOPIC_RGA_EMISSION, TOPIC_RGA_SAVE, TOPIC_RGA_SCAN,
                    ACK_HV_CLEAR, ACK_HV_OUTPUT, ACK_HV_VSET, ACK_LS_RANGE,
                    ACK_LS_SETPOINT, ACK_NOTIFY, TOPIC_AUDIT, TOPIC_HV_CLEAR,
                    TOPIC_HV_OUTPUT, TOPIC_HV_VSET, TOPIC_LS_RANGE, TOPIC_LS_SETPOINT,
@@ -839,6 +839,17 @@ def create_app(broker: str = "127.0.0.1", port: int = 1883, *,
         RGA service; this form only asks."""
         who = operator_of(request, by)
         result = state.command(TOPIC_RGA_EMISSION, ACK_RGA_EMISSION,
+                               {"action": action, "by": who}, timeout_s=15.0)
+        if result.get("ok"):
+            return _redirect_rga(None, result.get("detail", action))
+        return _redirect_rga(result.get("reason", "refused"))
+
+    @app.post("/rga/em")
+    def rga_em(request: Request, action: str = Form(""), by: str = Form("")):
+        """Electron multiplier On or Off. Its p105 limit and every other check
+        are in the RGA service; this form only asks."""
+        who = operator_of(request, by)
+        result = state.command(TOPIC_RGA_EM, ACK_RGA_EM,
                                {"action": action, "by": who}, timeout_s=15.0)
         if result.get("ok"):
             return _redirect_rga(None, result.get("detail", action))

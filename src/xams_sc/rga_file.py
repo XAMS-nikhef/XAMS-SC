@@ -14,7 +14,9 @@ in a notebook (`load_rga`).
       "sc_snapshot": {"p105": 3.1e-07, ...},  slow-control values at Save
       "comment": "...", "tags": [...], "background": "<file name or null>",
       "operator": "...",
-      "units": "A",                           scan values are ion currents
+      "units": "A",                           scan values are currents, as given
+      "detector": "Faraday" or "EM",          EM: electron current x gain,
+                                              unless device.em_equiv_ion
       "scans": [{"scannum": 1, "t": ..., "system_status": ..., "values": [...]}],
       "mean": [...]
     }
@@ -159,6 +161,13 @@ def summary(record: dict, summary_masses: list[float]) -> dict:
     """
     recipe, values = record["recipe"], record.get("mean") or []
     device = record.get("device") or {}
+    # With the electron multiplier on, the device reports electron current
+    # unless its "equivalent ion current" conversion is on. Divided here by
+    # the gain it holds, so EM and Faraday summaries lie on one scale - as
+    # good as that gain's calibration.
+    gain = em_gain(record)
+    if gain:
+        values = [v / gain for v in values]
     sens = device.get("pp_sensitivity_a_per_unit")
     to_mbar = device.get("unit_to_mbar")
     rows = []
@@ -173,6 +182,22 @@ def summary(record: dict, summary_masses: list[float]) -> dict:
             "comment": record.get("comment") or "",
             "total_pressure_mbar": device.get("total_pressure_mbar"),
             "peaks": rows}
+
+
+def em_gain(record: dict) -> float | None:
+    """The factor a saved file's values are above ion current: the EM gain
+    when it was taken with the EM and without the device's own conversion,
+    else None."""
+    device = record.get("device") or {}
+    if record.get("detector") != "EM":
+        return None
+    try:
+        if int(device.get("em_equiv_ion") or 0):
+            return None
+        gain = float(device.get("em_gain") or 0)
+    except (TypeError, ValueError):
+        return None
+    return gain if gain > 0 else None
 
 
 # ----------------------------------------------------------------- the file
@@ -232,6 +257,7 @@ def brief(path: Path | str) -> dict:
             "scans": len(record.get("scans") or []),
             "tags": record.get("tags") or [], "comment": record.get("comment") or "",
             "emission": (record.get("device") or {}).get("emission_state"),
+            "detector": record.get("detector") or "Faraday",
             "kb": round(path.stat().st_size / 1024, 1)}
 
 
