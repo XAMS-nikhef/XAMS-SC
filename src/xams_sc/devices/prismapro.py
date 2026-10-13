@@ -7,9 +7,10 @@ used from a notebook as well as from the service in `rga.py`.
 `set(path, value)`. `MMSPClient` reads; `MMSPControl` (below) adds the few
 writes the RGA plan needs, each built from a fixed target in `WRITABLE`:
 taking and releasing control, setting up, starting and stopping a scan, and
-switching emission On or Off (step 3, with nothing but those two values).
-The electron multiplier, the ion source, filament selection, degas, IO,
-network and firmware are not in it and cannot be reached from here.
+switching emission On or Off (step 3) and the electron multiplier On or Off
+(step 4), each with nothing but those two values. The EM voltage and gain,
+the ion source, filament selection, degas, IO, network and firmware are not
+in it and cannot be reached from here.
 
 The protocol, as found on our unit (firmware 1.9.5, 13 October 2026):
 
@@ -139,6 +140,7 @@ WRITABLE = frozenset({
     "scanSetup",                 # startChannel, stopChannel, scanCount, scanStart, scanStop
     "scanSetup/channels/{n}",    # channelMode, startMass, stopMass, ppamu, dwell, enabled
     "generalControl/setEmission",  # On or Off, nothing else (EMISSION_VALUES)
+    "generalControl/setEM",        # On or Off, nothing else (EMISSION_VALUES)
 })
 
 # The only values setEmission may be given. On also starts the RF; Off stops
@@ -173,8 +175,9 @@ class MMSPControl(MMSPClient):
         if allowed is None:
             # A bare value: /communication/control/set?force
             (value,) = fields.values()
-            if target == "generalControl/setEmission" and value not in EMISSION_VALUES:
-                raise PermissionError(f"setEmission accepts only {sorted(EMISSION_VALUES)}")
+            if (target in ("generalControl/setEmission", "generalControl/setEM")
+                    and value not in EMISSION_VALUES):
+                raise PermissionError(f"{target} accepts only {sorted(EMISSION_VALUES)}")
             query = quote(str(value), safe="")
         else:
             query = "&".join(f"{k}={quote(str(v), safe='')}" for k, v in fields.items())
@@ -272,6 +275,21 @@ class MMSPControl(MMSPClient):
                     return asked
                 time.sleep(0.25)
 
+    def set_em(self, on: bool) -> str:
+        """Ask for the electron multiplier On or Off; return the read-back,
+        polled as for emission. The EM itself starts in seconds - its real
+        state is systemStatus bit 23 (`em_on`), a failed start is a hardware
+        error (API reference, "Set Electron Multiplier State")."""
+        want = "On" if on else "Off"
+        with self.lock:
+            self._set("generalControl/setEM", {"v": want})
+            deadline = time.monotonic() + self.EMISSION_CONFIRM_S
+            while True:
+                asked = str(self.get("generalControl/setEM"))
+                if asked == want or time.monotonic() >= deadline:
+                    return asked
+                time.sleep(0.25)
+
 
 # ------------------------------------------------------------------ decoding
 
@@ -306,6 +324,16 @@ def decode_system_status(word: int) -> dict[str, bool]:
 def emission_on(word: int) -> bool:
     """Emission is on when the regulator runs in either of its modes."""
     return bool(word >> 31 & 1 or word >> 30 & 1)
+
+
+EM_ON_BIT = 1 << 23
+EM_PENDING_BIT = 1 << 22
+EM_INTERLOCK_BIT = 1 << 21
+
+
+def em_on(word: int) -> bool:
+    """The electron multiplier is on and in control (systemStatus bit 23)."""
+    return bool(word & EM_ON_BIT)
 
 
 # tPunits / gauge units: 0 Torr, 1 mbar, 2 Pa (API reference, "TP units").

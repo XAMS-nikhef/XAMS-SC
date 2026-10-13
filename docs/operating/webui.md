@@ -47,6 +47,11 @@ your scroll position. If those fetches stop — the web service down, the networ
 gone — it says **NOT UPDATING** and greys the whole drawing out after twenty
 seconds. A frozen plausible drawing is worse than an obviously dead one.
 
+**RGA** does not reload either: every five seconds it fetches itself and
+swaps in only the parts that changed (state, controls, saved files), leaving
+alone the part your cursor is in and putting back what you typed, chose or
+ticked elsewhere. The spectrum has its own fetch, every two seconds.
+
 Every other page except **Logs** reloads itself **every ten seconds**, so a
 screen left open is never showing yesterday.
 
@@ -540,6 +545,35 @@ has it. p105 is measured at the turbo, not at the analyser: with a valve
 closed between them it can read low while the pre-volume is not. The
 analyser's own over-pressure trip remains the protection; this is a guard on
 top of it.
+
+### Electron multiplier
+
+The EM (a CDEM) multiplies the signal by its gain, so peaks a hundred to a
+thousand times smaller than the Faraday cup sees become visible. It has its
+**own, lower pressure limit**: p105 below **1 × 10⁻⁵ mbar**
+(`devices.yaml` `em_guard_limit_mbar`; the datasheet allows 5 × 10⁻⁵, the
+service refuses to start with more, or with more than the emission limit).
+
+**Switch EM on** asks for a confirmation and is refused — greyed, with the
+reason under it — unless this system holds the analyser, **emission is on**,
+no scan is running (one detector per acquisition), p105 is fresh and below the
+EM limit, and the analyser reports no hardware errors and no EM interlock.
+Between the two limits — p105 at 2 × 10⁻⁵ mbar, say — emission may be on and
+the EM not.
+
+The EM goes off **by itself**, and the page says why:
+
+- at once when p105 reaches the EM limit (emission stays on);
+- when p105 stops arriving, after the same grace as emission;
+- **always before emission goes off**, for whatever reason;
+- on *Release control*, and when the service stops.
+
+If the EM goes off during a scan taken with it, the acquisition stops there;
+the scans so far can be saved. A scan records which detector took it; the plot
+and the Grafana summary divide EM values by the analyser's gain (shown in the
+state card), so EM and Faraday numbers share one scale — as good as that
+gain's calibration. The gain is set and calibrated in PV MassSpec, never from
+here.
 
 ### Scanning
 

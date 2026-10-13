@@ -88,6 +88,7 @@ to start unless the analyser reports the `match.name` and `match.serial` from
 | Channel | From | Unit | |
 |---|---|---|---|
 | `rga_emission` | `status/systemStatus` bit 31 or 30 | bool | the real state, not the last request |
+| `rga_em` | `status/systemStatus` bit 23 | bool | electron multiplier on (added in step 4) |
 | `rga_control` | `communication/controlInfo` | code | 0 nobody, 1 this system, 2 another client |
 | `rga_status` | `status/systemStatus` | bits | named on the page |
 | `rga_hw_errors` | `status/hardwareErrors` | bits | 0 = none |
@@ -96,7 +97,7 @@ to start unless the analyser reports the `match.name` and `match.serial` from
 | `rga_box_temp` | `diagnosticData/internalBoxTemperature` | C | electronics box |
 
 These are ordinary channels: archived, in PostgreSQL, available to alarms and
-Grafana - seven numbers every 10 s, never spectra (decided 13 October 2026).
+Grafana - eight numbers every 10 s (seven until step 4), never spectra (decided 13 October 2026).
 No alarm thresholds are set on them yet. The identity and **who** holds
 control (client name, address) go on the retained topic `xams/rga/info`,
 outside `xams/meas`, so they are not archived.
@@ -290,6 +291,54 @@ Consequences:
 
 ---
 
+## What is built (step 4, 13 October 2026)
+
+**Electron multiplier On/Off**, a button under Emission on the page.
+
+Found on the device (state snapshot, 13 October 2026): detector CDEM, `setEM`
+Off, `emVoltage` 800 V (600–2000), `emGain` 1234.57 at m/z 28 (`emGainMass`
+2800 cAMU) - a round-looking number, probably not a calibration -
+`emEquivIonSet` 0, so with the EM on the values are electron current, not
+divided by the gain. `emOnTime` 409: it has been used before. The analyser
+switches the EM off itself when the total-pressure current exceeds
+`tpemThresholdCurrent` (5 × 10⁻⁷ A); this system reads that, never changes it.
+
+- `MMSPControl.set_em(on)`: `generalControl/setEM`, On or Off only, read-back
+  polled as for emission. The EM's voltage, gain and conversion stay
+  unwritable.
+- **The pressure limit.** `em_guard_limit_mbar` (1 × 10⁻⁵) on the same p105.
+  `_pressure_allows(limit)` is the one check, used by `guard_allows()`
+  (emission) and `em_guard_allows()` (EM); `_off_reason(limit)` the one rule
+  for going off (at once at the limit; after max age + grace when p105 is
+  missing). The page shows both limits in the p105 row and the EM's reason
+  under its button.
+- **EM On** only with control, emission on, no scan running, p105 fresh and
+  below the EM limit, no hardware errors, no EM interlock (bit 21).
+- **EM Off by itself** (`_watch_em`, before `_watch_emission` in every read):
+  at the EM limit, p105 stale past the grace, emission off; and before every
+  emission off (page, guard, idle, release, shutdown).
+- **One detector per acquisition**: an acquisition records `detector`
+  (`Faraday`/`EM`) at its start; EM On/Off is refused during a scan; if the
+  guard takes the EM off during an EM acquisition, it stops there (saveable).
+- **Units**: values stay as the device gives them. A saved file carries
+  `detector` and the EM settings (`em_voltage_v`, `em_gain`,
+  `em_gain_mass_camu`, `em_equiv_ion`); `rga_file.em_gain(record)` gives the
+  factor to divide by (None for Faraday, or when the device already converts).
+  The summary and the plot divide by it.
+- **State**: channel `rga_em` (bit 23); the page shows on/starting/interlock,
+  voltage and gain.
+
+**Page refresh** (same PR): the page no longer reloads. Every 5 s it fetches
+itself and swaps in the changed parts, keeping typed and ticked inputs; the
+base page's 10 s reload is off for it. The reload made the page jump and
+emptied a half-filled Save form.
+
+**Not yet switched on**: p105 is about 2 × 10⁻⁵ mbar, above the EM limit. The
+first EM run is for the lab, together, once p105 is below 1 × 10⁻⁵: emission
+on → EM on → `quick` → Save → EM off → compare with a Faraday `quick`. A gain
+calibration in PV MassSpec (EM vs Faraday on N₂ 28 or Ar 40, then save to the
+device) should come first if absolute EM numbers matter.
+
 ## The API, in short
 
 Plain HTTP GET on port 80, JSON back. `/mmsp/<group>/<target>/get`, or
@@ -364,7 +413,7 @@ the HTTP equivalent of `*IDN?`.
 | Full measurement | `data/rga/YYYY/YYYY-MM-DDTHHMMSS_<recipe>.json` | only on **Save** |
 | Summary: total pressure and ~10 masses | PostgreSQL `rga_summary` → its own Grafana dashboard | only on Save |
 | Emission on/off, control taken/released | audit, as for HV | on the action |
-| State: emission, control, status words, trips, box temperature | seven ordinary channels (`rga_*`), archived like any channel | every 10 s |
+| State: emission, EM, control, status words, trips, box temperature | eight ordinary channels (`rga_*`), archived like any channel | every 10 s |
 | Identity, who holds control | retained `xams/rga/info`, not archived | on change |
 
 - The RGA files are a separate set from `data/raw/*.jsonl`. No spectra in the
@@ -402,14 +451,22 @@ the HTTP equivalent of `*IDN?`.
     - during operation: p105 at or above the limit → emission off at once;
     - p105 stale: a grace period (60 s), then emission off;
     - every guard action audited. Details: [step 3](#what-is-built-step-3-13-october-2026).
+- **EM limit: the electron multiplier only with p105 below 1 × 10⁻⁵ mbar**
+  (`em_guard_limit_mbar`; datasheet maximum with the C-SEM on 5 × 10⁻⁵ hPa,
+  a factor five kept). The same check on the same p105 as for emission - one
+  function, two limits - so freshness, quality, unit and grace are judged
+  alike. At the limit the EM goes off at once and emission stays on; the EM
+  goes off before emission whatever the reason. A configured limit above the
+  datasheet's or above the emission limit stops the service at start, rather
+  than being clipped. Details: [step 4](#what-is-built-step-4-13-october-2026).
 - **Caveat:** p105 is measured at the turbo; the RGA is on the pre-volume with
   valves in between. With a valve closed, p105 can be low while the RGA sees
   more. The device's own over-pressure trip stays the last line of defence;
   this system reads its settings and never changes them.
 - **Writable targets are a whitelist** in `prismapro.py`: control and lock,
-  `clientName`, `scanSetup`, `setEmission` (On/Off only). Never
-  `sensorIonSource`, `setEM`, `shutdown`, firmware, network, IO, `userDB` or
-  degas. Every write
+  `clientName`, `scanSetup`, `setEmission` and `setEM` (On/Off only). Never
+  `sensorIonSource`, `sensorDetector` (EM voltage, gain), `emEquivIonSet`,
+  `shutdown`, firmware, network, IO, `userDB` or degas. Every write
   is checked, read back, acknowledged on the bus and audited, as for `VSET`.
 - **Never `force` without an operator choosing it**, and control is released
   when the service is idle, so PV MassSpec can still be used.
@@ -429,10 +486,13 @@ the HTTP equivalent of `*IDN?`.
    plan, done together) — built 13 October 2026, not yet deployed, first
    emission-on run in the lab (see
    [What is built](#what-is-built-step-3-13-october-2026)).
-4. **Grafana:** its own dashboard on `rga_summary`; a file browser on the page.
-5. **Electron multiplier** (CDEM, ~100-1000× the Faraday cup's signal): later.
-   On only with emission on and a low pressure, off before emission off.
-6. **Later:** trend mode; analysis helpers.
+4. **Electron multiplier** (CDEM, ~100-1000× the Faraday cup's signal) —
+   built 13 October 2026, not yet switched on (see
+   [What is built](#what-is-built-step-4-13-october-2026)). Was step 5.
+5. **Grafana:** its own dashboard on `rga_summary`. (The file list on the
+   page is done.)
+6. **Later:** trend mode; analysis helpers; EM gain calibration from here
+   (now in PV MassSpec).
 
 **Decided in step 2:** values stored as the device gives them (A); pressures in
 mbar converted in the service, the device left in Torr; summary masses 2, 4,
