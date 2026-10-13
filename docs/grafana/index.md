@@ -78,7 +78,9 @@ Loading it into Grafana (once, and after editing the JSON by hand):
 ```
 
 `--load` with a uid loads only that dashboard; without one it loads (and
-overwrites) every archived dashboard.
+overwrites) every archived dashboard. On the Nikhef VM the installer loads it
+(`--load --missing`), and the summaries reach the VM's database through the
+sinks' second writer ([VM](../vm.md)).
 
 ---
 

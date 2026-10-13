@@ -1241,3 +1241,54 @@ class TestGrafanaDashboard:
     def test_131_is_not_a_summary_mass_on_it(self):
         """131 is mostly C3F5+ from PTFE: xenon is read from 129 and 132."""
         assert "WHEN 131" not in json.dumps(self.dashboard())
+
+
+class TestOnTheVm:
+    """The RGA summaries also go to the Nikhef VM, INSERT only (docs/vm.md)."""
+
+    class Cursor:
+        def __init__(self, log):
+            self.log = log
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def execute(self, sql, params=None):
+            self.log.append(sql)
+
+    class Conn:
+        def __init__(self):
+            self.log = []
+        def cursor(self):
+            return TestOnTheVm.Cursor(self.log)
+
+    SUMMARY = {"t": "2026-10-13T19:19:56Z", "file": "2026-10-13T191448_survey.json",
+               "recipe": "survey", "detector": "EM",
+               "peaks": [{"mass": 28.0, "current_a": 5e-11, "pp_mbar": None}]}
+
+    def test_the_vm_writer_never_updates_an_existing_row(self):
+        conn = self.Conn()
+        rga_writer.store(conn, self.SUMMARY, update=False)
+        assert all("DO NOTHING" in sql and "DO UPDATE" not in sql for sql in conn.log)
+
+    def test_the_local_writer_brings_the_detector_up_to_date(self):
+        conn = self.Conn()
+        rga_writer.store(conn, self.SUMMARY)
+        assert "DO UPDATE SET detector" in conn.log[0]
+
+    def test_the_rebuild_tool_will_not_replace_on_the_vm(self, capsys):
+        import importlib.util
+        path = pathlib.Path(__file__).resolve().parents[1] / "tools" / "rga_rebuild_summary.py"
+        spec = importlib.util.spec_from_file_location("rga_rebuild_summary", path)
+        tool = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(tool)
+        assert tool.main(["--remote", "--replace"]) == 2
+        assert "may only" in capsys.readouterr().err
+
+    def test_the_vm_installer_grants_insert_and_key_columns_only(self):
+        script = (pathlib.Path(__file__).resolve().parents[1] / "tools" / "vm"
+                  / "install_vm.sh").read_text(encoding="utf-8")
+        assert "GRANT INSERT ON rga_saves, rga_summary TO xams_writer;" in script
+        grants = [l for l in script.splitlines() if "xams_writer" in l and "rga_" in l]
+        assert not [l for l in grants if "UPDATE" in l or "DELETE" in l]
+        assert "--load --missing" in script

@@ -239,6 +239,12 @@ GRANT INSERT ON meas, alarm_events TO xams_writer;
 -- denied for table meas" (found on the first connection, 23 September 2026).
 -- The key columns only: the writer still cannot read a single value.
 GRANT SELECT (t, channel, src) ON meas TO xams_writer;
+-- The RGA summaries (docs/drivers/rga.md, 13 October 2026): INSERT, and
+-- SELECT on the key columns for ON CONFLICT, as for meas. Never UPDATE or
+-- DELETE: a corrected summary is rewritten here by an admin, not the lab PC.
+GRANT INSERT ON rga_saves, rga_summary TO xams_writer;
+GRANT SELECT (file) ON rga_saves TO xams_writer;
+GRANT SELECT (file, mass) ON rga_summary TO xams_writer;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO xams_reader;
 ALTER DEFAULT PRIVILEGES FOR ROLE xams_admin IN SCHEMA public
     GRANT SELECT ON TABLES TO xams_reader;
@@ -315,7 +321,11 @@ if [[ ! -f $CONF_DIR/.dashboards-loaded ]]; then
         --load --url "$GRAFANA_URL" --user admin
     touch "$CONF_DIR/.dashboards-loaded"
 else
-    note "dashboards already loaded once; not overwriting UI edits"
+    # A dashboard added to git since (the RGA one, 13 October 2026) is loaded;
+    # one that is already here is never touched.
+    GRAFANA_PASSWORD=$GRAFANA_ADMIN_PW python3 "$REPO_DIR/tools/save_dashboard.py" \
+        --load --missing --url "$GRAFANA_URL" --user admin
+    note "dashboards: new ones loaded; existing ones (and their UI edits) untouched"
 fi
 
 # ------------------------------------------------------------------ nginx
