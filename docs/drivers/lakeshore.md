@@ -5,7 +5,7 @@ system** (§10). The setpoint and the heater range on output 1 can be
 commanded; everything else here is read-only.
 
 How to drive it is in [The web
-interface](../operating/webui.md#the-controls). This page is the instrument.
+interface](../operating/webui.md#control). This page is the instrument.
 
 ---
 

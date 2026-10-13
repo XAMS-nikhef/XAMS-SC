@@ -6,7 +6,7 @@ identity rests entirely on the `BDSNUM` query.
 The driver **writes exactly four things: `VSET`, `ON`, `OFF` and `BDCLR`**
 (§10a), each checked, read back from the board and audited. `BDCLR` clears a
 latched trip — see [Recovering from a trip](#recovering-from-a-trip).
-How to drive it is in [The web interface](../operating/webui.md#high-voltage).
+How to drive it is in [The web interface](../operating/webui.md#control-high-voltage).
 
 It **reads** the protection settings at startup and alarms on a mismatch, and
 never writes them: ramp rate, trip current and over-voltage limit are configured
@@ -174,7 +174,7 @@ normally.
 
 That asymmetry is why a board in `LOCAL` looks exactly like a working one
 until somebody tries to change something. The driver reads `BDCTR` at startup
-and logs it, and the [HV page](../operating/webui.md#high-voltage) shows it.
+and logs it, and the [HV page](../operating/webui.md#control-high-voltage) shows it.
 
 ---
 

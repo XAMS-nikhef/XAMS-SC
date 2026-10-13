@@ -223,8 +223,9 @@ Quality is the driver's own verdict on the reading:
 
 ## Control
 
-**One page acts on hardware: Control.** The CAEN supplies, the cryostat
-setpoint and the flow-integrator reset are all on it, because "I want to
+**One page acts on hardware: Control** — with one exception, the
+[RGA](#rga), which has its own page. The CAEN supplies, the cryostat
+setpoint and the flow-integrator reset are all on Control, because "I want to
 change something" is one question and it should have one answer. The P&I
 links here rather than carrying the forms itself. Everything below is confirmed
 before it is sent, audited with your name, and answered by the service that owns
@@ -478,6 +479,69 @@ trip current and over-voltage limit live on the instrument, and that is what
 keeps this software out of the protection path.
 
 ---
+
+## RGA
+
+The residual gas analyser (Pfeiffer PrismaPro, on the pre-volume). Its own
+page, not part of Control: taking it, scanning, looking at the spectrum,
+saving and giving it back are one piece of work around one plot. Control links
+here. Background and design: [RGA](../drivers/rga.md).
+
+**This page cannot switch emission**, nor the electron multiplier or the ion
+source. With emission off a scan measures the detector's noise, about
+10⁻¹⁴ A — which is what a background scan is. Emission is still switched with
+PV MassSpec.
+
+### What it shows
+
+The instrument (name, firmware, filaments, the unit the device uses), then its
+state: **Emission** on or off, **Control** — nobody, *this system*, or *another
+client* with its name and address (PV MassSpec, or someone in the analyser's
+own web page) — hardware errors and warnings, the analyser's own lifetime count
+of **over-pressure trips** (a rise means it switched emission off itself), the
+electronics temperature, and the named `systemStatus` bits.
+
+### Taking it and giving it back
+
+**Take control** before anything else. If another client holds the analyser
+this is refused, saying who; tick *take it anyway* only when you know their
+measurement can be cut off — it asks once more. **Release control** gives it
+back (and stops a running scan).
+
+You do not have to remember to release: the service gives control back by
+itself after five minutes without a scan or a command, and when it stops. PV
+MassSpec is never locked out by a page left open.
+
+### Scanning
+
+Pick a recipe and press **Start**:
+
+| Recipe | What | Time |
+|---|---|---|
+| `survey` | 1–200 amu, 10 points/amu | 3 scans of ~32 s |
+| `air_leak` | 2, 4, 14, 18, 28, 32, 40, 44 amu | 10 scans of ~2 s |
+| `xenon` | 124–136 amu (Xe⁺ isotopes) | 5 scans of ~4 s |
+| `quick` | 1–50 amu, 4 points/amu | 2 scans of ~6 s |
+
+Recipes are in `config/rga_recipes.yaml`; a new one is a few lines there and a
+restart of `XAMS-rga`. The plot fills in as scans arrive: green the latest
+scan, grey the mean so far, log or linear, in ampere. **Stop** ends a scan
+early; what was taken can still be saved.
+
+### Saving
+
+Nothing is stored unless you press **Save**. The form appears when an
+acquisition has finished or was stopped. Write what the measurement is — valves
+open or closed, before or after a fill — and tags (`background`,
+`before-fill`, `after-bake`, `leak-check`). For a measurement, name the
+background file it should be compared with.
+
+A Save writes one file, `data/rga/YYYY/<start>_<recipe>.json`, with every scan,
+their mean, the analyser's settings and the slow-control values at that
+moment, and adds a summary of up to nine masses (those the recipe covers) to
+the database for Grafana. One
+acquisition is saved once. Reading a file back for analysis:
+`xams_sc.rga_file.load_rga(path)`.
 
 ## System health
 

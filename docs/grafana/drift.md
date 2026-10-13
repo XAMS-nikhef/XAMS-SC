@@ -7,7 +7,7 @@ behind without a word. It did, which is why this check exists.
 
 The system therefore answers the question itself, on
 [`xams-ctl status`](../operating/index.md#every-day) and on the System health page of
-[the web interface](../operating/webui.md#overview):
+[the web interface](../operating/webui.md#system-health):
 
 ```
   grafana   dashboards saved to git (1)
