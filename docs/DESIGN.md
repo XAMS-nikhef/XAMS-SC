@@ -667,8 +667,8 @@ Read-only. The chassis has no output module, so this service has no control path
 | `9207/ai3` | `p104` | 0 | 1 | |
 | `9207/ai4` | `v4` | 0 | 1 | generic name — likely unused |
 | `9207/ai5` | `pmain` | 0 | 0.714 | **detector pressure** |
-| `9207/ai6` | `v6` | 0 | 1 | generic name — likely unused |
-| `9207/ai7` | `fm101` | 0 | 6 | **flow meter** |
+| `9207/ai6` | `fm101` | 0 | 6 | **flow meter** (moved from ai7, 13 October 2026) |
+| `9207/ai7` | `p105_v` | 0 | 1 | **PKR vacuum gauge signal**, floating (off the AI-/COM jumper chain); `p105` [mbar] derived via `pkr_pressure` |
 
 **NI 9207 current channels.** The current half was unused until 22 September 2026, when two 4-20 mA strain gauge load cells were wired to `ai8` and `ai9`. Their LabVIEW names `i0`–`i7` with offset 0 and multiplier 1 throughout were what settled that the half was idle; it is idle no longer.
 

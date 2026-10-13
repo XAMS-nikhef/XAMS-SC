@@ -59,6 +59,10 @@ class ChannelView:
         """
         if self.value is None or not self.healthy:
             return "—"
+        # A vacuum pressure spans twelve decades; "0.000" would hide all of
+        # them. Scientific notation, as on the gauge's own display.
+        if self.unit == "mbar":
+            return f"{self.value:.2e}"
         magnitude = abs(self.value)
         if magnitude >= 1000:
             return f"{self.value:,.0f}"

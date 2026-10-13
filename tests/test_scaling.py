@@ -90,3 +90,18 @@ class TestIntegrator:
         total = sum(integrate_step(6.0, 10.0) for _ in range(360))
         assert total == pytest.approx(360.0)  # 6 g/min for 60 min
         assert not math.isnan(total)
+
+
+class TestPkrPressure:
+    """PKR 251 manual, appendix A: p = 10^(1.667 U - 11.33) mbar, 0.6 V/decade."""
+
+    @pytest.mark.parametrize("volts,mbar", [(8.6, 1000.0), (6.8, 1.0), (5.0, 1e-3),
+                                            (3.2, 1e-6)])
+    def test_the_manual_table(self, volts, mbar):
+        from xams_sc.scaling import pkr_pressure
+        assert pkr_pressure(volts) == pytest.approx(mbar, rel=0.05)
+
+    @pytest.mark.parametrize("volts", [-1.0, 0.0, 0.49, 9.51, 10.0])
+    def test_no_supply_or_a_broken_pirani_is_not_a_pressure(self, volts):
+        from xams_sc.scaling import pkr_pressure
+        assert pkr_pressure(volts) is None
