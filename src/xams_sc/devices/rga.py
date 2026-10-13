@@ -175,6 +175,10 @@ class RgaService(BaseService):
                 f"{self._guard_limit:g})")
         self._em_note: str | None = None          # why the EM last went off by itself
         self._em_settings: dict = {}              # voltage, gain, as last read
+        # Whether the analyser's stored EM gain has been checked against the
+        # Faraday cup. It had not on 13 October 2026 (stored 1234.57, measured
+        # ~30 at 800 V): EM values are then relative, and the page says so.
+        self._em_gain_calibrated = bool(self._spec.get("em_gain_calibrated", False))
 
         # Commands run on a worker thread, never on the MQTT thread: an
         # analyser call takes up to seconds, and the MQTT thread is the one
@@ -345,6 +349,7 @@ class RgaService(BaseService):
                                "interlock": bool((self._status_word or 0) & INTERLOCK_BIT),
                                "note": self._emission_note},
                   "em": {"on": self.em_is_on(),
+                         "gain_calibrated": self._em_gain_calibrated,
                          "pending": bool((self._status_word or 0) & EM_PENDING_BIT),
                          "interlock": bool((self._status_word or 0) & EM_INTERLOCK_BIT),
                          "note": self._em_note, **self._em_settings},
@@ -447,12 +452,14 @@ class RgaService(BaseService):
                        "values": last["values"],
                        "mean": rga_file.mean([s["values"] for s in acq["scans"]]),
                        "detector": acq.get("detector", "Faraday")}
-        # The factor the values are above ion current, for the plot: the
-        # same rule as for a saved file (rga_file.em_gain).
-        payload["gain"] = rga_file.em_gain(
-            {"detector": payload["detector"],
-             "device": {"em_gain": self._em_settings.get("gain"),
-                        "em_equiv_ion": self._em_settings.get("equiv_ion")}})
+        # For the plot: the gain, and what to multiply the values by to get
+        # ion current - the same rule as for a saved file (rga_file.ion_scale).
+        as_saved = {"detector": payload["detector"],
+                    "device": {"em_gain": self._em_settings.get("gain"),
+                               "em_equiv_ion": self._em_settings.get("equiv_ion")}}
+        payload["gain"] = rga_file.em_gain(as_saved)
+        payload["scale"] = rga_file.ion_scale(as_saved)
+        payload["gain_calibrated"] = self._em_gain_calibrated
         self.bus.publish_raw(TOPIC_RGA_SCANDATA, json.dumps(payload), retain=True)
         if acq["state"] == "scanning":
             self._persist(acq)

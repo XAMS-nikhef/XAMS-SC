@@ -161,6 +161,11 @@ rga:
   # to start with a value above 5e-5 or above guard_limit_mbar.
   # A.P. Colijn, 13 October 2026 (was 1e-5 the same day).
   em_guard_limit_mbar: 4.0e-5
+  # Has the analyser's stored EM gain been checked against the Faraday cup
+  # (in PV MassSpec)? Until then EM values divided by it are relative only,
+  # and the page says so. 13 October 2026: stored 1234.57 at 800 V, measured
+  # |EM|/Faraday ~30 - not calibrated.
+  em_gain_calibrated: false
   # Control is given back after this long without a scan or a command (not
   # while emission is on).
   release_idle_s: 300

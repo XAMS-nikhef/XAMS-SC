@@ -347,6 +347,28 @@ on → EM on → `quick` → Save → EM off → compare with a Faraday `quick`.
 calibration in PV MassSpec (EM vs Faraday on N₂ 28 or Ar 40, then save to the
 device) should come first if absolute EM numbers matter.
 
+**First EM survey** (13 October 2026, by the user, p105 1.65 × 10⁻⁵ mbar,
+`2026-10-13T191448_survey.json`). Found:
+
+- **EM values are negative**: electron current, with `emEquivIonSet` 0 - every
+  peak below zero, ~85 % of all points. The summary's largest-value-near-a-mass
+  then took the point nearest zero. Fixed: `rga_file.ion_scale(record)` is
+  `EM_SIGN / gain` (EM_SIGN = −1) for EM without the device's conversion, 1
+  otherwise; the summary and the plot multiply by it. Stored summaries rebuilt
+  with `--replace`.
+- **The stored gain is not the real one.** |EM| / Faraday at 800 V: ≈ 30 for
+  m/z 14–32 (37 at 2), 17 at 40, 12 at 44, 2–5 above 69 (partly noise). The
+  analyser holds 1234.57, ~40 × too high, so EM ion currents come out ~40 ×
+  too low. `devices.yaml` `em_gain_calibrated: false` makes the page and the
+  plot say *uncalibrated*: EM values are relative until the gain is set and
+  calibrated in PV MassSpec (voltage up to ~1000–1500 V for a gain of
+  10³–10⁴; then `em_gain_calibrated: true`).
+- EM noise (sd) 5 × 10⁻¹⁴ A against 1.6 × 10⁻¹⁴ with the Faraday cup: at
+  800 V the gain in signal-to-noise is ~10 at light masses, ~1 at xenon.
+- An EM `xenon` scan (not saved) showed 129 ≈ 132 ≈ 4.7 × 10⁻¹³ A (raw), as
+  natural Xe has them, at ~3–4 × the noise: a hint of xenon, not yet a
+  measurement.
+
 ## The API, in short
 
 Plain HTTP GET on port 80, JSON back. `/mmsp/<group>/<target>/get`, or
