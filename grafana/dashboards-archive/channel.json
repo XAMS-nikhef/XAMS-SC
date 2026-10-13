@@ -99,10 +99,6 @@
             },
             "properties": [
               {
-                "id": "unit",
-                "value": "pressurembar"
-              },
-              {
                 "id": "custom.scaleDistribution",
                 "value": {
                   "log": 10,
@@ -110,8 +106,20 @@
                 }
               },
               {
+                "id": "unit",
+                "value": "sci"
+              },
+              {
                 "id": "decimals",
                 "value": 2
+              },
+              {
+                "id": "displayName",
+                "value": "p105 (mbar)"
+              },
+              {
+                "id": "custom.axisLabel",
+                "value": "mbar"
               }
             ]
           }
