@@ -47,9 +47,10 @@
           "query": "SELECT DISTINCT mass FROM rga_summary ORDER BY 1",
           "refId": "rga-mass"
         },
-        "refresh": 2,
+        "refresh": 1,
         "multi": true,
         "includeAll": true,
+        "allValue": "SELECT DISTINCT mass FROM rga_summary",
         "sort": 3,
         "current": {
           "selected": true,
@@ -59,7 +60,64 @@
           "value": [
             "$__all"
           ]
-        }
+        },
+        "options": [
+          {
+            "selected": true,
+            "text": "All",
+            "value": "$__all"
+          },
+          {
+            "selected": false,
+            "text": "2",
+            "value": "2"
+          },
+          {
+            "selected": false,
+            "text": "4",
+            "value": "4"
+          },
+          {
+            "selected": false,
+            "text": "18",
+            "value": "18"
+          },
+          {
+            "selected": false,
+            "text": "28",
+            "value": "28"
+          },
+          {
+            "selected": false,
+            "text": "32",
+            "value": "32"
+          },
+          {
+            "selected": false,
+            "text": "40",
+            "value": "40"
+          },
+          {
+            "selected": false,
+            "text": "44",
+            "value": "44"
+          },
+          {
+            "selected": false,
+            "text": "69",
+            "value": "69"
+          },
+          {
+            "selected": false,
+            "text": "129",
+            "value": "129"
+          },
+          {
+            "selected": false,
+            "text": "132",
+            "value": "132"
+          }
+        ]
       },
       {
         "name": "recipe",
@@ -74,9 +132,10 @@
           "query": "SELECT DISTINCT recipe FROM rga_saves ORDER BY 1",
           "refId": "rga-recipe"
         },
-        "refresh": 2,
+        "refresh": 1,
         "multi": true,
         "includeAll": true,
+        "allValue": "SELECT DISTINCT recipe FROM rga_saves",
         "sort": 1,
         "current": {
           "selected": true,
@@ -86,7 +145,34 @@
           "value": [
             "$__all"
           ]
-        }
+        },
+        "options": [
+          {
+            "selected": true,
+            "text": "All",
+            "value": "$__all"
+          },
+          {
+            "selected": false,
+            "text": "air_leak",
+            "value": "air_leak"
+          },
+          {
+            "selected": false,
+            "text": "quick",
+            "value": "quick"
+          },
+          {
+            "selected": false,
+            "text": "survey",
+            "value": "survey"
+          },
+          {
+            "selected": false,
+            "text": "xenon",
+            "value": "xenon"
+          }
+        ]
       },
       {
         "name": "detector",

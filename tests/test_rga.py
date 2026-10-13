@@ -1225,6 +1225,14 @@ class TestGrafanaDashboard:
             assert "rga_" in sql or "FROM meas WHERE channel = 'p105'" in sql
             assert not any(w in sql.upper() for w in ("INSERT", "UPDATE ", "DELETE", "DROP"))
 
+    def test_all_is_a_subquery_never_the_loaded_list(self):
+        """13 October 2026: Grafana 13 expanded All to "IN ()" before the
+        options were fetched; every panel failed with a syntax error."""
+        for v in self.dashboard()["templating"]["list"]:
+            if v.get("includeAll"):
+                assert v["allValue"].upper().startswith("SELECT DISTINCT"), v["name"]
+                assert v["refresh"] == 1 and len(v["options"]) > 1
+
     def test_the_detector_defaults_to_faraday(self):
         """EM values are relative while the gain is uncalibrated."""
         (det,) = [v for v in self.dashboard()["templating"]["list"] if v["name"] == "detector"]
