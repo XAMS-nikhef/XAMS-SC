@@ -60,6 +60,7 @@ CONTROL_NONE, CONTROL_US, CONTROL_OTHER = 0, 1, 2
 
 SCANNING_BIT = 1 << 1
 INTERLOCK_BIT = 1 << 27
+EMISSION_PENDING_BIT = 1 << 28      # asked for, not yet on (API: "System Status")
 # The datasheet's maximum operating pressures (QMG 250 M, "Technical data"),
 # hPa = mbar: 5e-4 with the Faraday cup, 5e-5 with the C-SEM (electron
 # multiplier). The configured limits may be lower, never higher.
@@ -346,6 +347,7 @@ class RgaService(BaseService):
                   "recipe_error": self._recipe_error,
                   "saved_files": self._saved_files,
                   "emission": {"on": self.emission_is_on(),
+                               "pending": bool((self._status_word or 0) & EMISSION_PENDING_BIT),
                                "interlock": bool((self._status_word or 0) & INTERLOCK_BIT),
                                "note": self._emission_note},
                   "em": {"on": self.em_is_on(),
