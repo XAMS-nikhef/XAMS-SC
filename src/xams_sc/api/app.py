@@ -868,6 +868,22 @@ def create_app(broker: str = "127.0.0.1", port: int = 1883, *,
             return _redirect_rga(None, result.get("detail", "saved"))
         return _redirect_rga(result.get("reason", "refused"))
 
+    @app.get("/rga/file/{name}")
+    def rga_file_download(name: str):
+        """One saved RGA measurement, as a download. Only a name of the
+        saved-file pattern is served, from the RGA data directory and nowhere
+        else."""
+        from fastapi.responses import FileResponse
+        from .. import rga_file
+        from ..config import ROOT
+        if not rga_file.FILE_NAME.fullmatch(name):
+            return PlainTextResponse("not an RGA file name", status_code=404)
+        spec = state.config.devices.get("rga", {}) or {}
+        path = ROOT / str(spec.get("data_dir", "data/rga")) / name[:4] / name
+        if not path.is_file():
+            return PlainTextResponse("no such file", status_code=404)
+        return FileResponse(path, media_type="application/json", filename=name)
+
     @app.get("/api/rga/scan")
     def api_rga_scan():
         """The latest scan of the running acquisition, for the live plot.

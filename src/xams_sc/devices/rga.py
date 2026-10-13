@@ -151,6 +151,14 @@ class RgaService(BaseService):
         self._commands: queue.Queue = queue.Queue()
         self._load_recipes(int(self._spec.get("mass_range", 200)))
 
+        # The last acquisition, until it is saved, also lives on disk: the
+        # service is restarted for every deployment, and an unsaved survey was
+        # lost that way once (13 October 2026). Reading it back is a file
+        # read, nothing touches the analyser.
+        self._pending_path = self._data_dir / "pending.json"
+        self._restore_pending()
+        self._saved_files = self._list_saved()
+
     def _load_recipes(self, mass_range: int) -> None:
         path = CONFIG_DIR / "rga_recipes.yaml"
         try:
@@ -214,6 +222,8 @@ class RgaService(BaseService):
         self._client = client
         self._identity = ident.as_dict() | {"host": host}
         self._publish_info()
+        if self._acq is not None and self._acq.get("scans"):
+            self._publish_scan(self._acq)       # the restored one, for the plot
         return True
 
     def reconnect(self) -> bool:
@@ -286,6 +296,7 @@ class RgaService(BaseService):
                                   "seconds": round(rga_file.scan_seconds(r), 1)}
                               for n, r in self._recipes.items()},
                   "recipe_error": self._recipe_error,
+                  "saved_files": self._saved_files,
                   "emission": {"on": self.emission_is_on(),
                                "interlock": bool((self._status_word or 0) & INTERLOCK_BIT),
                                "note": self._emission_note},
@@ -339,6 +350,31 @@ class RgaService(BaseService):
                 self._finish(acq, "done")
                 return
 
+    def _restore_pending(self) -> None:
+        acq = rga_file.read_pending(self._pending_path)
+        if not acq or acq.get("saved") or not acq.get("scans"):
+            return
+        if acq.get("state") == "scanning":
+            acq["state"] = "stopped"
+            acq["error"] = "the service restarted during the scan"
+        acq["mono_start"] = time.monotonic()
+        self._acq = acq
+        log.info("unsaved RGA acquisition restored: %d scans of %s from %s",
+                 len(acq["scans"]), acq["recipe"]["name"], acq["t_start"])
+
+    def _list_saved(self) -> list[dict]:
+        try:
+            return rga_file.recent(self._data_dir)
+        except OSError:
+            return []
+
+    def _persist(self, acq: dict) -> None:
+        try:
+            with self._acq_lock:
+                rga_file.write_pending(self._pending_path, acq)
+        except (OSError, ValueError) as exc:
+            log.warning("could not keep the RGA acquisition on disk: %s", exc)
+
     def _finish(self, acq: dict, state: str, error: str | None = None) -> None:
         with self._acq_lock:
             acq["state"] = state
@@ -350,6 +386,7 @@ class RgaService(BaseService):
                          len(acq["scans"]), acq["recipe"]["name"])
             self._last_activity = time.monotonic()
         self.interval_s = self._idle_interval
+        self._persist(acq)
         self._publish_info()
 
     def _publish_scan(self, acq: dict) -> None:
@@ -361,6 +398,8 @@ class RgaService(BaseService):
                        "values": last["values"],
                        "mean": rga_file.mean([s["values"] for s in acq["scans"]])}
         self.bus.publish_raw(TOPIC_RGA_SCANDATA, json.dumps(payload), retain=True)
+        if acq["state"] == "scanning":
+            self._persist(acq)
         self._publish_info()
 
     def _release_if_idle(self, control: dict) -> None:
@@ -638,6 +677,11 @@ class RgaService(BaseService):
             return
         with self._acq_lock:
             acq["saved"] = record["file"]
+        try:
+            self._pending_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        self._saved_files = self._list_saved()
         self.bus.publish_raw(TOPIC_RGA_SAVED, json.dumps(
             rga_file.summary(record, self._summary_masses)))
         self._publish_info()

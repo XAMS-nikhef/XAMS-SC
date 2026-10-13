@@ -205,8 +205,56 @@ def load_rga(path: Path | str) -> dict:
 
 
 def files(directory: Path | str):
-    """Every measurement file under `directory`, oldest first."""
+    """Every measurement file under `directory`, oldest first. The pending
+    acquisition (`pending.json`, top level) is not one of them."""
     return sorted(Path(directory).glob("*/*.json"))
+
+
+# What a saved file is called; anything else is not served or listed.
+FILE_NAME = re.compile(r"\d{4}-\d{2}-\d{2}T\d{6}_[a-z0-9_]+\.json")
+
+
+def brief(path: Path | str) -> dict:
+    """The few fields the page lists for one saved file."""
+    path = Path(path)
+    record = json.loads(path.read_text(encoding="utf-8"))
+    return {"file": path.name, "t_saved": record.get("t_saved"),
+            "recipe": (record.get("recipe") or {}).get("name"),
+            "scans": len(record.get("scans") or []),
+            "tags": record.get("tags") or [], "comment": record.get("comment") or "",
+            "emission": (record.get("device") or {}).get("emission_state"),
+            "kb": round(path.stat().st_size / 1024, 1)}
+
+
+def recent(directory: Path | str, n: int = 10) -> list[dict]:
+    """The `n` newest saved files, newest first. Unreadable ones are skipped."""
+    out = []
+    for path in reversed(files(directory)):
+        try:
+            out.append(brief(path))
+        except (OSError, ValueError):
+            continue
+        if len(out) >= n:
+            break
+    return out
+
+
+def write_pending(path: Path | str, acq: dict) -> None:
+    """Keep the unsaved acquisition on disk, so a restart does not lose it.
+    Written to a temporary file and moved, so it is never half-written."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    keep = {k: v for k, v in acq.items() if k != "mono_start"}
+    tmp.write_text(json.dumps(keep), encoding="utf-8")
+    tmp.replace(path)
+
+
+def read_pending(path: Path | str) -> dict | None:
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
 
 
 def finite(values: list[float]) -> bool:

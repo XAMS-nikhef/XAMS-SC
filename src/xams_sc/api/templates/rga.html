@@ -29,7 +29,11 @@
   .rga-controls h3:first-of-type { margin-top:.2rem; }
   .rga-controls form { margin:.3rem 0; }
   .rga-controls input[type=text], .rga-controls select { width:100%; box-sizing:border-box; }
-  .rga-controls .stack { display:flex; flex-direction:column; gap:.4rem; }
+  /* Buttons at their own width, not the panel's: a column of full-width bars
+     reads as one big button. */
+  .rga-controls .stack { display:flex; flex-direction:column; gap:.4rem; align-items:flex-start; }
+  .rga-controls .stack button { min-width:9rem; }
+  .rga-files td { vertical-align:top; }
 </style>
 
 {% if ok %}<div class="flash good" style="margin:0 0 1rem 0">{{ ok }}</div>{% endif %}
@@ -157,14 +161,21 @@
   </form>
   {% endif %}
 
-  {% if acq and acq.done and not scanning and not acq.saved %}
   <h3>Save</h3>
+  {% if acq and acq.done and not scanning and not acq.saved %}
   <form method="post" action="/rga/save" class="stack">
     <input type="text" name="comment" placeholder="comment — what, where, valves">
     <input type="text" name="tags" placeholder="tags, e.g. background, before-fill">
     <input type="text" name="background" placeholder="background file (optional)">
     <button type="submit">Save</button>
   </form>
+  <div class="dim" style="font-size:.85em">{{ acq.recipe }}, {{ acq.done }} scans{% if acq.state != 'done' %} ({{ acq.state }}){% endif %} — not saved yet</div>
+  {% else %}
+  <div class="dim" style="font-size:.85em">
+    {% if scanning %}the scan is running; Save appears when it ends or is stopped
+    {% elif acq and acq.saved %}the last acquisition is saved as {{ acq.saved }}
+    {% else %}nothing to save: run a scan first{% endif %}
+  </div>
   {% endif %}
 
   <div class="note" style="margin-top:1rem">Control is given back by itself
@@ -191,6 +202,31 @@
     few masses for Grafana.
   </div>
 </div>
+</div>
+
+{% set files = info.get('saved_files') or [] %}
+<div class="card rga-files" style="margin-top:1.2rem">
+  <h2>Saved measurements</h2>
+  {% if files %}
+  <table>
+    <tr><th>Saved (UTC)</th><th>Recipe</th><th class="num">Scans</th><th>Emission</th>
+        <th>Tags</th><th>Comment</th><th class="num">kB</th><th></th></tr>
+    {% for f in files %}
+    <tr><td>{{ (f.get('t_saved') or '')[:19]|replace('T', ' ') }}</td>
+        <td>{{ f.get('recipe') }}</td>
+        <td class="num">{{ f.get('scans') }}</td>
+        <td>{{ f.get('emission') or '—' }}</td>
+        <td>{{ (f.get('tags') or [])|join(', ') }}</td>
+        <td class="dim">{{ f.get('comment') }}</td>
+        <td class="num">{{ f.get('kb') }}</td>
+        <td><a href="/rga/file/{{ f.get('file') }}">{{ f.get('file') }}</a></td></tr>
+    {% endfor %}
+  </table>
+  <div class="note">The ten newest, from <code>data/rga/</code> on this PC. Read
+    one in Python with <code>xams_sc.rga_file.load_rga(path)</code>.</div>
+  {% else %}
+  <p class="dim">None yet.</p>
+  {% endif %}
 </div>
 
 <script>
