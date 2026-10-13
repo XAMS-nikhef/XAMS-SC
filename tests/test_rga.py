@@ -907,3 +907,26 @@ class TestTheSaveSectionIsAlwaysThere:
     def test_with_nothing_to_save_it_says_so(self, client):
         body = client.get("/rga").text
         assert ">Save<" in body and "nothing to save" in body
+
+
+class TestPeakWindow:
+    """13 October 2026: a large C3F5+ peak at 131.2 (the analyser reads ~0.2
+    amu high) and no xenon. Its tail at 131.5 must not count as Xe-132."""
+    RECIPE = {"channels": [{"mode": "sweep", "start": 129, "stop": 133, "ppamu": 10, "dwell": 32}]}
+
+    def values(self, peaks):
+        ms = rga_file.masses(self.RECIPE)
+        return [sum(h * max(0.0, 1 - abs(m - c) / 0.45) for c, h in peaks) + 1e-14 for m in ms]
+
+    def test_the_tail_of_131_is_not_132(self):
+        v = self.values([(131.2, 6e-13)])
+        assert rga_file.peak(self.RECIPE, v, 131) == pytest.approx(6e-13 + 1e-14)
+        assert rga_file.peak(self.RECIPE, v, 132) < 1e-13
+
+    def test_a_peak_read_high_is_still_found(self):
+        v = self.values([(132.3, 5e-13)])
+        assert rga_file.peak(self.RECIPE, v, 132) == pytest.approx(5e-13 + 1e-14)
+
+    def test_69_is_a_summary_mass(self):
+        from xams_sc.devices.rga import SUMMARY_MASSES
+        assert 69 in SUMMARY_MASSES

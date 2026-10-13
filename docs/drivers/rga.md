@@ -162,7 +162,7 @@ operator. One acquisition is saved once; a file is never overwritten.
 **Summary** → `rga_saves` (one row per Save) and `rga_summary` (one row per
 summary mass: the largest mean current within ±0.5 amu, and a partial
 pressure in mbar from the device's own sensitivity and unit). Summary masses
-in `devices.yaml` `rga.summary_masses` (2, 4, 18, 28, 32, 40, 44, 129, 132).
+in `devices.yaml` `rga.summary_masses` (2, 4, 18, 28, 32, 40, 44, 69, 129, 132).
 Written by `sinks/rga_writer.py` from `xams/rga/saved`; rebuilt from the
 files with `python tools/rga_rebuild_summary.py`. Tables in `sql/schema.sql`.
 Local PostgreSQL only for now; the Grafana dashboard (step 4) decides whether
@@ -271,6 +271,22 @@ control → Switch emission on → `quick` → Save → Switch emission off → 
   under the pointer and the names of common molecules (H2O, N2/CO, O2, Ar,
   CO2, Xe isotopes, Xe++) where they fit.
 - `xenon` now starts at 120 amu, a few below the lightest isotope (124).
+
+**The peak at 131 is a fluorocarbon, not xenon** (same day). The `xenon` scan
+showed one peak at 131 (6 × 10⁻¹³ A) and no 129/132 pair, where natural Xe has
+132 ≈ 129 > 131. The survey shows the oxygen-free perfluoro series - 69 CF₃⁺,
+81, 93, 100 C₂F₄⁺, 119 C₂F₅⁺, 131 C₃F₅⁺, 169 C₃F₇⁺, 181 - and not the ether
+fragments of a PFPE oil (135, 147, 185 at noise): PTFE, which is in the
+vacuum. Read xenon from 129 and 132. The mass scale reads about 0.2 amu high
+above ~60 amu (69.2, 100.2, 119.2, 131.2), an alignment of the instrument.
+Consequences:
+
+- the summary takes a peak from 0.25 amu below to 0.45 amu above the mass
+  (was ±0.5): the symmetric window put the tail of 131 into "132";
+- 69 (CF₃⁺) is a summary mass, the fluorocarbon monitor;
+- the plot names 131 *Xe-131/C3F5*, and 69, 100, 119, 169;
+- `tools/rga_rebuild_summary.py --replace` rewrites stored summary rows
+  from the files, for when the peak reading changes.
 
 ---
 
@@ -420,5 +436,5 @@ the HTTP equivalent of `*IDN?`.
 
 **Decided in step 2:** values stored as the device gives them (A); pressures in
 mbar converted in the service, the device left in Torr; summary masses 2, 4,
-18, 28, 32, 40, 44, 129, 132 (`devices.yaml`, changeable, history rebuilt from
+18, 28, 32, 40, 44, 69, 129, 132 (`devices.yaml`, changeable, history rebuilt from
 the files).

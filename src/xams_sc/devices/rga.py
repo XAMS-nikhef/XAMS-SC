@@ -59,7 +59,9 @@ CONTROL_NONE, CONTROL_US, CONTROL_OTHER = 0, 1, 2
 
 SCANNING_BIT = 1 << 1
 INTERLOCK_BIT = 1 << 27
-SUMMARY_MASSES = [2, 4, 18, 28, 32, 40, 44, 129, 132]
+# 69 is CF3+, the largest of the fluorocarbon (PTFE) series seen on
+# 13 October 2026; it tells whether a peak at 131 is C3F5+ rather than Xe.
+SUMMARY_MASSES = [2, 4, 18, 28, 32, 40, 44, 69, 129, 132]
 
 
 def _control_code(info: dict) -> int:

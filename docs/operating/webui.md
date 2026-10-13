@@ -556,8 +556,10 @@ Recipes are in `config/rga_recipes.yaml`; a new one is a few lines there and a
 restart of `XAMS-rga`. The plot fills in as scans arrive: green the latest
 scan, a light line the mean so far, log or linear, in ampere against m/z.
 Single-mass recipes (`air_leak`) are drawn as bars. Common molecules are named
-at their mass (H2O, N2/CO, O2, Ar, CO2, the Xe isotopes, Xe++ near 66) where
-there is room; *molecules* switches the names off. Point at the plot to read
+at their mass (H2O, N2/CO, O2, Ar, CO2, the Xe isotopes, Xe++ near 66, the
+fluorocarbons CF3, C2F4, C2F5, C3F7 from PTFE) where there is room. 131 is
+named *Xe-131/C3F5*: it is xenon only if 129 and 132 are there, about as
+large; *molecules* switches the names off. Point at the plot to read
 the mass and current there. **Stop** ends a scan
 early; what was taken can still be saved.
 
@@ -574,7 +576,7 @@ background file it should be compared with.
 
 A Save writes one file, `data/rga/YYYY/<start>_<recipe>.json`, with every scan,
 their mean, the analyser's settings and the slow-control values at that
-moment, and adds a summary of up to nine masses (those the recipe covers) to
+moment, and adds a summary of up to ten masses (those the recipe covers) to
 the database for Grafana. One
 acquisition is saved once. Reading a file back for analysis:
 `xams_sc.rga_file.load_rga(path)`.
