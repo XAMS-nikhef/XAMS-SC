@@ -800,3 +800,85 @@ class TestThePageLayout:
     def test_with_emission_on_the_button_switches_it_off(self, webui):
         body = self.page_with(webui, emission=1.0)
         assert 'value="off"' in body and "Emission OFF" in body
+
+
+# ============================================================ keeping data
+#
+# An unsaved survey was lost on 13 October 2026 when the service was restarted
+# for a deployment: the acquisition lived only in memory.
+
+class TestAnUnsavedAcquisitionSurvivesARestart:
+    def test_it_is_restored_and_can_still_be_saved(self, monkeypatch, tmp_path, analyser):
+        first = running(monkeypatch, tmp_path, analyser)
+        acquire(first)
+        assert (tmp_path / "rga" / "pending.json").exists()
+
+        second = running(monkeypatch, tmp_path, analyser)      # the restart
+        acq = second.bus.last_json("xams/rga/info")["acquisition"]
+        assert (acq["state"], acq["done"]) == ("done", 2)
+        assert len(second.bus.last_json("xams/rga/scan")["values"]) == QUICK_POINTS
+        assert command(second, "_handle_save", "xams/ack/rga/save")["ok"]
+        assert not (tmp_path / "rga" / "pending.json").exists()
+
+    def test_one_cut_off_mid_scan_comes_back_as_stopped(self, monkeypatch, tmp_path, analyser):
+        first = running(monkeypatch, tmp_path, analyser)
+        command(first, "_handle_control", "xams/ack/rga/control", action="take")
+        first.read()
+        command(first, "_handle_scan", "xams/ack/rga/scan", action="start", recipe="quick")
+        analyser["device"].queue = analyser["device"].queue[:1]
+        analyser["device"].scanning = True
+        first.read()                                           # one scan in
+        second = running(monkeypatch, tmp_path, analyser)
+        acq = second.bus.last_json("xams/rga/info")["acquisition"]
+        assert acq["state"] == "stopped" and acq["done"] == 1
+        assert "restarted" in acq["error"]
+
+    def test_a_saved_one_is_not_restored(self, monkeypatch, tmp_path, analyser):
+        first = running(monkeypatch, tmp_path, analyser)
+        acquire(first)
+        command(first, "_handle_save", "xams/ack/rga/save")
+        second = running(monkeypatch, tmp_path, analyser)
+        assert second.bus.last_json("xams/rga/info")["acquisition"] is None
+
+
+class TestSavedFilesAreListed:
+    def test_a_save_appears_in_the_list(self, monkeypatch, tmp_path, analyser):
+        service = running(monkeypatch, tmp_path, analyser)
+        acquire(service)
+        ack = command(service, "_handle_save", "xams/ack/rga/save",
+                      comment="pump-down", tags=["test"])
+        files = service.bus.last_json("xams/rga/info")["saved_files"]
+        assert files[0]["file"] == ack["file"]
+        assert files[0]["comment"] == "pump-down" and files[0]["scans"] == 2
+
+    def test_pending_is_not_listed_as_saved(self, monkeypatch, tmp_path, analyser):
+        service = running(monkeypatch, tmp_path, analyser)
+        acquire(service)
+        assert rga_file.files(tmp_path / "rga") == []
+
+
+class TestTheDownload:
+    def setup_file(self, monkeypatch, tmp_path):
+        from xams_sc import config as config_module
+        monkeypatch.setattr(config_module, "ROOT", tmp_path)
+        name = "2026-10-13T150521_quick.json"
+        (tmp_path / "data" / "rga" / "2026").mkdir(parents=True)
+        (tmp_path / "data" / "rga" / "2026" / name).write_text('{"format": "xams-rga/1"}')
+        return name
+
+    def test_a_saved_file_is_served(self, webui, monkeypatch, tmp_path):
+        name = self.setup_file(monkeypatch, tmp_path)
+        r = webui[0].get(f"/rga/file/{name}")
+        assert r.status_code == 200 and r.json()["format"] == "xams-rga/1"
+
+    @pytest.mark.parametrize("name", ["..%2F..%2Fconfig%2Fsecrets.yaml", "pending.json",
+                                      "2026-10-13T150521_quick.yaml", "x.json"])
+    def test_nothing_else_is(self, webui, monkeypatch, tmp_path, name):
+        self.setup_file(monkeypatch, tmp_path)
+        assert webui[0].get(f"/rga/file/{name}").status_code == 404
+
+
+class TestTheSaveSectionIsAlwaysThere:
+    def test_with_nothing_to_save_it_says_so(self, client):
+        body = client.get("/rga").text
+        assert ">Save<" in body and "nothing to save" in body

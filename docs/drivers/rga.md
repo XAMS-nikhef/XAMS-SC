@@ -238,6 +238,19 @@ Settings, all in `devices.yaml` `rga:` with these defaults: `guard_channel`
 `p105`, `guard_limit_mbar` 5e-4, `guard_max_age_s` 30, `guard_grace_s` 60,
 `emission_idle_off_s` 3600, `release_idle_s` 300.
 
+**Unsaved data survives a restart** (added 13 October 2026, after an unsaved
+`survey` was lost when the service was restarted for a deployment). The
+running or last acquisition is kept in `data/rga/pending.json`, rewritten
+after every scan and when it ends, and deleted when it is saved. On start the
+service restores it: a finished one can still be saved, one cut off mid-scan
+comes back as *stopped*. It is not a saved file and not listed as one.
+
+**Saved files on the page.** The ten newest files in `data/rga/` are listed
+under the spectrum (time, recipe, scans, emission, tags, comment, size), each
+a download link (`/rga/file/<name>`, which serves only names of the saved-file
+pattern from that directory). The Save section is always shown, saying why
+there is nothing to save when there is not.
+
 **Not yet tested with emission on.** Tests (fake analyser): 78 for the RGA,
 full suite 1065. The first emission-on run is for the lab, together: take
 control → Emission ON → `quick` → Save → Emission OFF → Release.

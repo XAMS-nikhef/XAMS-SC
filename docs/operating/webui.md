@@ -558,8 +558,11 @@ early; what was taken can still be saved.
 
 ### Saving
 
-Nothing is stored unless you press **Save**. The form appears when an
-acquisition has finished or was stopped. Write what the measurement is — valves
+Nothing is stored unless you press **Save**. The Save section is always in
+the Controls panel; its form appears when an acquisition has finished or was
+stopped, and otherwise it says why there is nothing to save. An unsaved
+acquisition is not lost when the service restarts: it comes back and can still
+be saved. Write what the measurement is — valves
 open or closed, before or after a fill — and tags (`background`,
 `before-fill`, `after-bake`, `leak-check`). For a measurement, name the
 background file it should be compared with.
@@ -570,6 +573,9 @@ moment, and adds a summary of up to nine masses (those the recipe covers) to
 the database for Grafana. One
 acquisition is saved once. Reading a file back for analysis:
 `xams_sc.rga_file.load_rga(path)`.
+
+**Saved measurements**, under the spectrum: the ten newest files, each a
+download link.
 
 ## System health
 
