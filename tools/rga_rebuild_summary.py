@@ -2,6 +2,7 @@
 
     python tools/rga_rebuild_summary.py            # all of data/rga/
     python tools/rga_rebuild_summary.py --dry-run  # say what would be stored
+    python tools/rga_rebuild_summary.py --replace  # recompute rows already there
 
 The files in `data/rga/` are the truth; `rga_saves` and `rga_summary` are an
 index over them (docs/drivers/rga.md, "Data"). This puts back what the
@@ -11,7 +12,9 @@ already there a no-op.
 
 The summary masses are the ones in `devices.yaml` `rga.summary_masses` NOW,
 which is also how to add a mass to the history after the fact: add it there
-and run this.
+and run this. When the way a peak is read changes (rga_file.peak), rows
+already stored keep their old values unless --replace: then each file's
+summary rows are deleted and written again, from the file.
 """
 
 from __future__ import annotations
@@ -35,6 +38,8 @@ def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--data-dir", default=str(ROOT / spec.get("data_dir", "data/rga")))
     p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--replace", action="store_true",
+                   help="delete and rewrite the summary rows of every file")
     args = p.parse_args(argv)
 
     masses = list(spec.get("summary_masses", SUMMARY_MASSES))
@@ -63,6 +68,9 @@ def main(argv=None) -> int:
             continue
         print(f"  {path.name}: {len(summary['peaks'])} masses")
         if conn is not None:
+            if args.replace:
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM rga_summary WHERE file = %s", (summary["file"],))
             store(conn, summary)
     if conn is not None:
         conn.close()

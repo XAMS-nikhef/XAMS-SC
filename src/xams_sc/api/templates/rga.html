@@ -258,13 +258,15 @@
   let last = null, hover = null;
 
   // Where to name a molecule, most telling first: a label is drawn only if
-  // it does not collide with one already placed. Doubly charged Xe sits at m/z 62-68.
+  // it does not collide with one already placed. 131 is also C3F5+, from
+  // PTFE: it is xenon only if 129 and 132 are there too, about as large. Doubly charged Xe sits at m/z 62-68.
   const MOLECULES = [
     [18, 'H2O'], [28, 'N2/CO'], [2, 'H2'], [44, 'CO2'], [32, 'O2'], [40, 'Ar'],
-    [4, 'He'], [132, 'Xe-132'], [129, 'Xe-129'], [131, 'Xe-131'], [134, 'Xe-134'],
+    [4, 'He'], [69, 'CF3'], [132, 'Xe-132'], [129, 'Xe-129'], [131, 'Xe-131/C3F5'], [134, 'Xe-134'],
     [136, 'Xe-136'], [130, 'Xe-130'], [66, 'Xe++'], [14, 'N'], [16, 'O/CH4'],
     [17, 'OH'], [15, 'CH3'], [12, 'C'], [20, 'Ar++'], [128, 'Xe-128'],
-    [126, 'Xe-126'], [124, 'Xe-124'], [1, 'H'], [22, 'CO2++'], [69, 'CF3'],
+    [126, 'Xe-126'], [124, 'Xe-124'], [1, 'H'], [22, 'CO2++'], [119, 'C2F5'], [100, 'C2F4'],
+    [169, 'C3F7'],
   ];
 
   function css(name, fallback) {

@@ -133,10 +133,19 @@ def mean(scans: list[list[float]]) -> list[float]:
 
 # ------------------------------------------------------------------ summary
 
+# The window a peak is looked for in, around the nominal mass. Not +-0.5:
+# the analyser's mass scale reads about 0.2 amu high above ~60 amu (13 October
+# 2026: 69.2, 100.2, 119.2, 131.2), and a symmetric window at 132 took the
+# tail of a large peak at 131 (a fluorocarbon, C3F5+) for xenon-132.
+PEAK_BELOW = 0.25
+PEAK_ABOVE = 0.45
+
+
 def peak(recipe: dict, values: list[float], at: float) -> float | None:
-    """The value at one mass: the largest within +-0.5 amu, or None if the
-    recipe does not cover it."""
-    found = [v for m, v in zip(masses(recipe), values) if abs(m - at) <= 0.5]
+    """The value at one mass: the largest from PEAK_BELOW under to PEAK_ABOVE
+    over it, or None if the recipe does not cover it."""
+    found = [v for m, v in zip(masses(recipe), values)
+             if -PEAK_BELOW - 1e-9 <= m - at <= PEAK_ABOVE + 1e-9]
     return max(found) if found else None
 
 
