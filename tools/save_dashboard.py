@@ -254,15 +254,21 @@ def main(argv=None) -> int:
         path = path_for(uid)
         new = json.dumps(dashboard, indent=2, ensure_ascii=False)
 
-        old = None
+        # Compared as CONTENT, keys sorted - the way src/xams_sc/grafana.py's
+        # drift watcher compares. Grafana returns keys in its own order, and a
+        # file edited by hand (or by a script) has the same content in another
+        # order; comparing the text reported that as "DIFFERS" right after a
+        # --load had made the two identical (13 October 2026).
+        same = False
         if path.exists():
             try:
-                old = json.dumps(normalise(json.loads(path.read_text(encoding="utf-8"))),
-                                 indent=2, ensure_ascii=False)
+                same = (json.dumps(normalise(json.loads(path.read_text(encoding="utf-8"))),
+                                   sort_keys=True)
+                        == json.dumps(dashboard, sort_keys=True))
             except Exception:
-                old = None
+                same = False
 
-        if old == new:
+        if same:
             print(f"  {uid:20s} unchanged  ({title})")
             continue
 

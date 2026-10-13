@@ -105,8 +105,8 @@
               {
                 "id": "custom.scaleDistribution",
                 "value": {
-                  "type": "log",
-                  "log": 10
+                  "log": 10,
+                  "type": "log"
                 }
               },
               {
@@ -206,5 +206,5 @@
   "timezone": "",
   "title": "Channel",
   "uid": "xams-channel",
-  "version": 1
+  "id": null
 }
