@@ -18,19 +18,22 @@ panel, which is worth remembering before editing one.
 
 ## What is on the Overview dashboard
 
-Nine panels, six of them time series:
+Ten panels, seven of them time series:
 
 | Panel | Selects | Unit |
 |---|---|---|
 | Temperatures — detector | `tt2%` | °C |
 | Temperatures — gas system & ambient | `tt1%`, `tt3%`, `tt4%`, `ttamb` | °C |
 | Pressures | `pmain`, `p101`–`p104` | bar |
+| Vacuum — P105 (PKR) and turbo speed | `p105` (left, **log** axis), `turbo_speed` (right, dashed) | mbar, Hz |
 | Flow (fm101) — mass flow | `fm101` | g/min |
 | High voltage — VMON (signed) | `hv_%_vmon` | V |
 | High voltage — IMON | `hv_%_imon` | µA |
 | Active alarms | latest state per channel, anything not `ok` | |
 | Alarm history | `alarm_events` over the range | |
 | Channels not reading OK | latest row per channel with `quality <> 'ok'` | |
+
+**Clicking P105 on the P&ID** opens the Channel dashboard, which draws `p105` on a log axis (a field override for that one channel); every other channel keeps its linear axis.
 
 **The 1xx / 2xx / 3xx series mean something**: xenon circulation, detector vessel
 and bucket, cooling and heat exchange (§3). That is why most panels select with

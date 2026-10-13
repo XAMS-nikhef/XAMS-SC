@@ -15,7 +15,7 @@
       }
     ]
   },
-  "description": "One time series for one channel, picked with $channel. This is what the P&ID mimic (DESIGN.md section 8.2a) opens when a value is clicked, so it is the one dashboard every tag in channels.yaml shares rather than one dashboard per tag. uid xams-channel and panel id 1 are hardcoded in mimic.html; changing either here is a breaking change there. The series is named after the channel (channel AS metric) so that a field override can target one channel: sg101/sg102 are shown to 3 decimals, because they are read against the flow meter and 1 uA of loop current is 1.25 g. Every other channel keeps Grafana's automatic precision, and the P&ID mimic is unaffected - it formats its own numbers in mimic.html.",
+  "description": "One time series for one channel, picked with $channel. This is what the P&ID mimic (DESIGN.md section 8.2a) opens when a value is clicked, so it is the one dashboard every tag in channels.yaml shares rather than one dashboard per tag. uid xams-channel and panel id 1 are hardcoded in mimic.html; changing either here is a breaking change there. The series is named after the channel (channel AS metric) so that a field override can target one channel: sg101/sg102 are shown to 3 decimals, because they are read against the flow meter and 1 uA of loop current is 1.25 g. p105 (the PKR vacuum gauge, mbar over twelve decades) is drawn on a LOG axis by the same kind of override, so clicking P105 on the P&ID opens a readable plot. Every other channel keeps Grafana's automatic precision, and the P&ID mimic is unaffected - it formats its own numbers in mimic.html.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -89,6 +89,29 @@
               {
                 "id": "unit",
                 "value": "suffix:kg"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "p105"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "pressurembar"
+              },
+              {
+                "id": "custom.scaleDistribution",
+                "value": {
+                  "type": "log",
+                  "log": 10
+                }
+              },
+              {
+                "id": "decimals",
+                "value": 2
               }
             ]
           }
