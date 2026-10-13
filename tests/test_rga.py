@@ -230,10 +230,10 @@ class TestPage:
         assert "another client" in body and "PVMassSpec" in body
         assert "0x01103B90" in body and "baseline_correction" in body
 
-    def test_the_page_has_no_emission_control(self, client):
-        """Step 2: control, scans and Save. Emission is not on this page."""
+    def test_the_page_has_no_electron_multiplier_control(self, client):
+        """Emission yes (step 3); the electron multiplier is a later stage."""
         body = client.get("/rga").text.lower()
-        assert "/rga/emission" not in body and "setemission" not in body
+        assert "/rga/em\"" not in body and "setem" not in body
 
 
 # ================================================================ step 2
@@ -257,6 +257,16 @@ class FakeAnalyser(MMSPControl):
         self.queue: list[dict] = []
         self.scanning = False
         self.sets: list[str] = []
+        self.emission = False
+        self.interlock = False
+
+    def status(self):
+        word = 0x01103B90 | (2 if self.scanning else 0)
+        if self.emission:
+            word |= 1 << 31
+        if self.interlock:
+            word |= 1 << 27
+        return word
 
     def _event(self, path, data, name="got"):
         return json.dumps({"name": name, "origin": path, "data": data}).encode()
@@ -282,6 +292,8 @@ class FakeAnalyser(MMSPControl):
                               for n in range(1, self.count + 1)]
             elif target == "scanSetup" and query.startswith("scanStop"):
                 self.scanning = False
+            elif target == "generalControl/setEmission":
+                self.emission = query == "On"
             return self._event(path, query, "wasSet")
         target = path[len("/mmsp/"):-len("/get")]
         if target == "communication/controlInfo":
@@ -292,13 +304,15 @@ class FakeAnalyser(MMSPControl):
                 if not self.queue:
                     self.scanning = False
                 return self._event(path, d)
-            return self._event(path, {"values": None, "systemStatus":
-                                      0x01103B92 if self.scanning else 0x01103B90})
+            return self._event(path, {"values": None, "systemStatus": self.status()})
+        if target == "status/systemStatus":
+            return self._event(path, self.status())
+        if target == "generalControl/setEmission":
+            return self._event(path, "On" if self.emission else "Off")
         extra = {"sensorIonSource/emissionCurrent": 2000,
                  "sensorIonSource/electronEnergy": 70,
                  "sensorIonSource/ppSensitivityFactor": 0.000793007,
                  "generalControl/setEM": "Off",
-                 "generalControl/setEmission": "Off",
                  "measurement/totalPressure": 0}
         if target in extra:
             return self._event(path, extra[target])
@@ -347,18 +361,26 @@ def acquire(service, recipe="quick"):
 
 
 class TestTheWhitelist:
-    def test_emission_and_the_ion_source_cannot_be_written(self):
-        assert not [t for t in WRITABLE if t.startswith(
+    def test_only_emission_is_writable_among_the_instrument_settings(self):
+        assert [t for t in WRITABLE if t.startswith(
             ("generalControl", "sensorIonSource", "sensorDetector", "digital",
-             "analog", "userDB", "system"))]
+             "analog", "userDB", "system"))] == ["generalControl/setEmission"]
 
-    @pytest.mark.parametrize("target", ["generalControl/setEmission",
-                                        "generalControl/setEM",
-                                        "sensorIonSource/emissionCurrent"])
+    @pytest.mark.parametrize("target", ["generalControl/setEM",
+                                        "generalControl/degas",
+                                        "sensorIonSource/emissionCurrent",
+                                        "sensorIonSource/filamentSelected"])
     def test_a_target_outside_it_is_refused_before_anything_is_sent(self, target):
         device = FakeAnalyser("x")
         with pytest.raises(PermissionError):
             device._set(target, {"v": "On"})
+        assert device.sets == []
+
+    @pytest.mark.parametrize("value", ["Standby", "on", "1", "Degas"])
+    def test_emission_takes_on_or_off_and_nothing_else(self, value):
+        device = FakeAnalyser("x")
+        with pytest.raises(PermissionError):
+            device._set("generalControl/setEmission", {"v": value})
         assert device.sets == []
 
     def test_an_unlisted_field_of_a_listed_target_is_refused(self):
@@ -566,3 +588,215 @@ class TestCommandsFromTheBusThread:
         finally:
             service._lock.release()
         assert service.bus.last_json("xams/ack/rga/control")["ok"]
+
+
+
+# ================================================================ step 3
+#
+# Emission On/Off behind the p105 guard. The guard is a software guard on top
+# of the analyser's own over-pressure trip (DESIGN.md section 10 rule 1).
+
+def p105(service, value, quality="ok", unit="mbar"):
+    service._on_snapshot("xams/meas/p105", json.dumps(
+        {"t": "2026-10-13T15:00:00Z", "ch": "p105", "v": value, "u": unit, "q": quality}))
+
+
+def holding(monkeypatch, tmp_path, analyser, p=1.9e-5):
+    service = running(monkeypatch, tmp_path, analyser)
+    if p is not None:
+        p105(service, p)
+    assert command(service, "_handle_control", "xams/ack/rga/control", action="take")["ok"]
+    service.read()
+    return service
+
+
+def emission(service, action):
+    return command(service, "_handle_emission", "xams/ack/rga/emission", action=action)
+
+
+class TestEmissionOn:
+    def test_with_control_and_a_good_p105_it_goes_on(self, monkeypatch, tmp_path, analyser):
+        service = holding(monkeypatch, tmp_path, analyser)
+        ack = emission(service, "on")
+        assert ack["ok"], ack
+        assert analyser["device"].emission
+        assert "1.90e-05" in ack["detail"]
+        service.read()
+        assert service.emission_is_on()
+        assert service.bus.last_json("xams/rga/info")["emission"]["on"]
+        assert service.bus.last_json("xams/audit")["action"] == "rga_emission_on"
+
+    def test_not_without_control(self, monkeypatch, tmp_path, analyser):
+        service = running(monkeypatch, tmp_path, analyser)
+        p105(service, 1.9e-5)
+        ack = emission(service, "on")
+        assert not ack["ok"] and "take control first" in ack["reason"]
+        assert not analyser["device"].emission
+
+    @pytest.mark.parametrize("value, quality, unit, words", [
+        (6e-4, "ok", "mbar", "at or above the limit"),
+        (5e-4, "ok", "mbar", "at or above the limit"),
+        (None, "error", "mbar", "quality is error"),
+        (1e-5, "ok", "bar", "expects mbar"),
+    ])
+    def test_not_past_the_guard(self, monkeypatch, tmp_path, analyser,
+                                value, quality, unit, words):
+        service = holding(monkeypatch, tmp_path, analyser, p=None)
+        p105(service, value, quality, unit)
+        ack = emission(service, "on")
+        assert not ack["ok"] and words in ack["reason"]
+        assert not [x for x in analyser["device"].sets if "setEmission" in x]
+
+    def test_not_when_p105_was_never_received(self, monkeypatch, tmp_path, analyser):
+        service = holding(monkeypatch, tmp_path, analyser, p=None)
+        ack = emission(service, "on")
+        assert not ack["ok"] and "has not been received" in ack["reason"]
+
+    def test_not_when_p105_is_stale(self, monkeypatch, tmp_path, analyser):
+        service = holding(monkeypatch, tmp_path, analyser)
+        service._guard_seen -= 31
+        ack = emission(service, "on")
+        assert not ack["ok"] and "s old" in ack["reason"]
+
+    def test_not_with_hardware_errors(self, monkeypatch, tmp_path, analyser):
+        service = holding(monkeypatch, tmp_path, analyser)
+        service._hw_errors = 0x10
+        ack = emission(service, "on")
+        assert not ack["ok"] and "hardware errors" in ack["reason"]
+
+    def test_not_with_the_interlock_active(self, monkeypatch, tmp_path, analyser):
+        service = holding(monkeypatch, tmp_path, analyser)
+        analyser["device"].interlock = True
+        service.read()
+        ack = emission(service, "on")
+        assert not ack["ok"] and "interlock" in ack["reason"]
+
+    def test_off_is_always_allowed_with_control(self, monkeypatch, tmp_path, analyser):
+        service = holding(monkeypatch, tmp_path, analyser)
+        emission(service, "on")
+        p105(service, 1e-3)                    # off must not need a good p105
+        ack = emission(service, "off")
+        assert ack["ok"] and not analyser["device"].emission
+
+
+class TestTheWatchdog:
+    def on(self, monkeypatch, tmp_path, analyser):
+        service = holding(monkeypatch, tmp_path, analyser)
+        assert emission(service, "on")["ok"]
+        service.read()
+        return service
+
+    def test_p105_above_the_limit_switches_it_off_at_once(self, monkeypatch, tmp_path, analyser):
+        service = self.on(monkeypatch, tmp_path, analyser)
+        p105(service, 7e-4)
+        service.read()
+        assert not analyser["device"].emission
+        audit = service.bus.last_json("xams/audit")
+        assert audit["action"] == "rga_emission_off" and audit["actor"] == "rga service"
+        assert "guard" in service.bus.last_json("xams/rga/info")["emission"]["note"]
+
+    def test_a_stale_p105_is_given_a_grace_period(self, monkeypatch, tmp_path, analyser):
+        service = self.on(monkeypatch, tmp_path, analyser)
+        service._guard_seen -= 31 + 30         # stale, but inside the grace
+        service.read()
+        assert analyser["device"].emission
+        service._guard_seen -= 31              # now past it
+        service.read()
+        assert not analyser["device"].emission
+
+    def test_a_good_p105_leaves_it_on(self, monkeypatch, tmp_path, analyser):
+        service = self.on(monkeypatch, tmp_path, analyser)
+        for _ in range(3):
+            p105(service, 2e-5)
+            service.read()
+        assert analyser["device"].emission
+
+    def test_an_hour_without_anything_switches_it_off(self, monkeypatch, tmp_path, analyser):
+        service = self.on(monkeypatch, tmp_path, analyser)
+        p105(service, 2e-5)
+        service._last_activity -= 3601
+        service.read()
+        assert not analyser["device"].emission
+
+    def test_control_is_not_given_up_while_emission_is_on(self, monkeypatch, tmp_path, analyser):
+        service = self.on(monkeypatch, tmp_path, analyser)
+        p105(service, 2e-5)
+        service._last_activity -= 400          # past release_idle_s, inside the hour
+        service.read()
+        assert analyser["device"].emission
+        assert not [x for x in analyser["device"].sets if x.endswith("control/set?release")]
+
+    def test_emission_on_from_another_client_is_left_alone(self, monkeypatch, tmp_path, analyser):
+        service = running(monkeypatch, tmp_path, analyser, other="PVMassSpec")
+        analyser["device"].emission = True
+        p105(service, 7e-4)
+        service.read()
+        assert analyser["device"].emission     # cannot write without control
+
+
+class TestEmissionIsNeverLeftBehind:
+    def test_release_switches_it_off_first(self, monkeypatch, tmp_path, analyser):
+        service = holding(monkeypatch, tmp_path, analyser)
+        emission(service, "on")
+        service.read()
+        ack = command(service, "_handle_control", "xams/ack/rga/control", action="release")
+        assert ack["ok"] and "emission switched off first" in ack["detail"]
+        sets = analyser["device"].sets
+        assert sets.index("/mmsp/generalControl/setEmission/set?Off") < \
+            sets.index("/mmsp/communication/control/set?release")
+
+    def test_a_stopping_service_switches_it_off(self, monkeypatch, tmp_path, analyser):
+        service = holding(monkeypatch, tmp_path, analyser)
+        emission(service, "on")
+        device = analyser["device"]
+        service.close()
+        assert not device.emission
+        assert device.sets[-1] == "/mmsp/communication/control/set?release"
+
+
+class TestCommandsRunOffTheBusThread:
+    def test_a_bus_callback_only_queues(self, monkeypatch, tmp_path, analyser):
+        service = running(monkeypatch, tmp_path, analyser)
+        callback = service._enqueue(service._handle_control)
+        callback("xams/cmd/rga/control", json.dumps({"action": "take", "by": "t"}))
+        assert service.bus.last_json("xams/ack/rga/control") is None   # not run yet
+        service._commands.put(None)
+        service._work()
+        assert service.bus.last_json("xams/ack/rga/control")["ok"]
+
+
+class TestThePageLayout:
+    def page_with(self, webui, emission=0.0, guard_ok=True):
+        client, app, bus = webui
+        bus.deliver(TOPIC_RGA_INFO, json.dumps({
+            "identity": {"name": "RGA PrismaPro A 200 47504651", "detector": "CDEM"},
+            "control": {"controlled": True, "us": True, "client": "xams-sc"},
+            "recipes": {"quick": {"description": "", "scans": 2, "seconds": 6.3}},
+            "emission": {"on": bool(emission), "interlock": False, "note": None},
+            "guard": {"channel": "p105", "value": 1.9e-5 if guard_ok else 7e-4,
+                      "unit": "mbar", "quality": "ok", "age_s": 3.0,
+                      "limit_mbar": 5e-4, "ok": guard_ok,
+                      "reason": "p105 = 1.90e-05 mbar < 5.0e-04 mbar" if guard_ok
+                      else "p105 = 7.00e-04 mbar, at or above the limit 5.0e-04 mbar"}}))
+        deliver(bus, "rga_control", 1.0, "code")
+        deliver(bus, "rga_emission", emission, "bool")
+        return client.get("/rga").text
+
+    def test_identity_and_state_share_a_row_and_controls_sit_left_of_the_spectrum(self, webui):
+        body = self.page_with(webui)
+        pair, main = body.index('class="rga-pair"'), body.index('class="rga-main"')
+        assert pair < body.index("Residual gas analyser") < body.index(">State<") < main
+        controls, spectrum = body.index(">Controls<"), body.index(">Spectrum<")
+        assert main < controls < spectrum
+        for action in ('action="/rga/control"', 'action="/rga/emission"', 'action="/rga/scan"'):
+            assert controls < body.index(action) < spectrum
+
+    def test_emission_on_is_offered_only_past_the_guard(self, webui):
+        body = self.page_with(webui, guard_ok=False)
+        button = body[body.index('value="on"'):]
+        assert "disabled" in button[:button.index("</button>")]
+        assert "at or above the limit" in body
+
+    def test_with_emission_on_the_button_switches_it_off(self, webui):
+        body = self.page_with(webui, emission=1.0)
+        assert 'value="off"' in body and "Emission OFF" in body

@@ -140,3 +140,17 @@ rga:
   # about 0.7 s. Status every 5 s is plenty, and the device drops requests
   # that come too fast.
   read_interval_s: 5
+  # The p105 GUARD for emission (docs/drivers/rga.md, step 3). A software
+  # guard on top of the analyser's own over-pressure trip, not an interlock.
+  # Emission On is refused unless p105 is fresh and below the limit; the
+  # service switches emission Off at once at the limit, after the grace when
+  # p105 stops arriving, and after emission_idle_off_s without a scan or a
+  # command. Limit: A.P. Colijn, 13 October 2026.
+  guard_channel: p105
+  guard_limit_mbar: 5.0e-4
+  guard_max_age_s: 30
+  guard_grace_s: 60
+  emission_idle_off_s: 3600
+  # Control is given back after this long without a scan or a command (not
+  # while emission is on).
+  release_idle_s: 300

@@ -23,7 +23,7 @@ is lost, replay the archive into a new one. Nothing in any driver changes.
 **It reads everything and writes three instruments:** the Lake Shore heater
 (setpoint and range, output 1), both CAEN supplies (`VSET` per channel, and
 energising a channel), and the residual gas analyser (taking and releasing
-control, scan setup, start and stop; never emission). Every write is range-checked against `channels.yaml`,
+control, scan setup, start and stop, emission On/Off behind a p105 guard). Every write is range-checked against `channels.yaml`,
 read back from the instrument, acknowledged on the bus and audited. Enabling a
 channel and taking a board out of `LOCAL` stay hand operations at the front
 panel — no command exists for either.

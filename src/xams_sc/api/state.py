@@ -18,7 +18,7 @@ import time
 from dataclasses import dataclass
 
 from ..bus import (ACK_HV_CLEAR, ACK_HV_OUTPUT, ACK_HV_VSET, ACK_LS_RANGE, ACK_LS_SETPOINT,
-                   ACK_NOTIFY, ACK_RGA_CONTROL, ACK_RGA_SAVE, ACK_RGA_SCAN,
+                   ACK_NOTIFY, ACK_RGA_CONTROL, ACK_RGA_EMISSION, ACK_RGA_SAVE, ACK_RGA_SCAN,
                    TOPIC_RGA_SCANDATA, TOPIC_ALARM, TOPIC_BACKUP, TOPIC_FLOW_RESET,
                    TOPIC_HV_TRIP, TOPIC_MEAS, TOPIC_RELOAD, TOPIC_RGA_INFO,
                    TOPIC_STATUS,
@@ -381,6 +381,7 @@ class SystemState:
         self.bus.subscribe(ACK_RGA_CONTROL, self._on_ack)
         self.bus.subscribe(ACK_RGA_SCAN, self._on_ack)
         self.bus.subscribe(ACK_RGA_SAVE, self._on_ack)
+        self.bus.subscribe(ACK_RGA_EMISSION, self._on_ack)
         self.bus.subscribe(f"{TOPIC_MEAS}/#", self._on_measurement)
         self.bus.subscribe(f"{TOPIC_STATUS}/#", self._on_status)
         self.bus.subscribe(f"{TOPIC_ALARM}/#", self._on_alarm)

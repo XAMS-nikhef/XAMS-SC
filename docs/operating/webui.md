@@ -487,10 +487,14 @@ page, not part of Control: taking it, scanning, looking at the spectrum,
 saving and giving it back are one piece of work around one plot. Control links
 here. Background and design: [RGA](../drivers/rga.md).
 
-**This page cannot switch emission**, nor the electron multiplier or the ion
-source. With emission off a scan measures the detector's noise, about
-10⁻¹⁴ A — which is what a background scan is. Emission is still switched with
-PV MassSpec.
+Two rows: the instrument and its state side by side at the top; below, a
+**Controls** panel (control, emission, scan, Save) to the left of the
+spectrum.
+
+**Emission can be switched here; the electron multiplier, the filament
+choice and the ion source cannot.** Detection is with the Faraday cup. With
+emission off a scan measures the detector's noise, about 10⁻¹⁴ A — which is
+what a background scan is.
 
 ### What it shows
 
@@ -501,6 +505,9 @@ own web page) — hardware errors and warnings, the analyser's own lifetime coun
 of **over-pressure trips** (a rise means it switched emission off itself), the
 electronics temperature, and the named `systemStatus` bits.
 
+The state card also shows **p105 (guard)**: its value, its age and the limit,
+5 × 10⁻⁴ mbar, green when emission may go on.
+
 ### Taking it and giving it back
 
 **Take control** before anything else. If another client holds the analyser
@@ -509,8 +516,29 @@ measurement can be cut off — it asks once more. **Release control** gives it
 back (and stops a running scan).
 
 You do not have to remember to release: the service gives control back by
-itself after five minutes without a scan or a command, and when it stops. PV
-MassSpec is never locked out by a page left open.
+itself after five minutes without a scan or a command — not while emission is
+on — and when it stops. PV MassSpec is never locked out by a page left open.
+
+### Emission
+
+**Emission ON** asks for a confirmation and is refused — the button is
+greyed, with the reason under it — unless this system holds the analyser, p105
+is fresh (at most 30 s old) and below 5 × 10⁻⁴ mbar, the analyser reports no
+hardware errors and its emission interlock is clear. The filament must be
+under vacuum. The emission state follows within seconds.
+
+**Emission OFF** needs only control. Emission also goes off **by itself**:
+
+- at once when p105 reaches 5 × 10⁻⁴ mbar;
+- when p105 stops arriving for more than 90 s;
+- after an hour without a scan or a command;
+- on *Release control*, and when the service stops.
+
+Each time the page says why, in red under the state card, and the audit log
+has it. p105 is measured at the turbo, not at the analyser: with a valve
+closed between them it can read low while the pre-volume is not. The
+analyser's own over-pressure trip remains the protection; this is a guard on
+top of it.
 
 ### Scanning
 

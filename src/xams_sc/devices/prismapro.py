@@ -6,10 +6,10 @@ used from a notebook as well as from the service in `rga.py`.
 **WRITES ARE A WHITELIST, NOT A FUNCTION.** There is no general-purpose
 `set(path, value)`. `MMSPClient` reads; `MMSPControl` (below) adds the few
 writes the RGA plan needs, each built from a fixed target in `WRITABLE`:
-taking and releasing control, and setting up, starting and stopping a scan.
-Emission, the electron multiplier, the ion source, degas, IO, network and
-firmware are not in it and cannot be reached from here. Emission arrives in
-step 3 of the plan, as one more entry, deliberately.
+taking and releasing control, setting up, starting and stopping a scan, and
+switching emission On or Off (step 3, with nothing but those two values).
+The electron multiplier, the ion source, filament selection, degas, IO,
+network and firmware are not in it and cannot be reached from here.
 
 The protocol, as found on our unit (firmware 1.9.5, 13 October 2026):
 
@@ -138,7 +138,12 @@ WRITABLE = frozenset({
     "communication/controlLock",
     "scanSetup",                 # startChannel, stopChannel, scanCount, scanStart, scanStop
     "scanSetup/channels/{n}",    # channelMode, startMass, stopMass, ppamu, dwell, enabled
+    "generalControl/setEmission",  # On or Off, nothing else (EMISSION_VALUES)
 })
+
+# The only values setEmission may be given. On also starts the RF; Off stops
+# both (API reference, "Set Emission State").
+EMISSION_VALUES = frozenset({"On", "Off"})
 
 # The fields of scanSetup and of a channel that may be set.
 SCAN_FIELDS = frozenset({"startChannel", "stopChannel", "scanCount",
@@ -168,6 +173,8 @@ class MMSPControl(MMSPClient):
         if allowed is None:
             # A bare value: /communication/control/set?force
             (value,) = fields.values()
+            if target == "generalControl/setEmission" and value not in EMISSION_VALUES:
+                raise PermissionError(f"setEmission accepts only {sorted(EMISSION_VALUES)}")
             query = quote(str(value), safe="")
         else:
             query = "&".join(f"{k}={quote(str(v), safe='')}" for k, v in fields.items())
@@ -242,6 +249,16 @@ class MMSPControl(MMSPClient):
 
     def stop_scan(self) -> None:
         self._set("scanSetup", {"scanStop": "Immediately"})
+
+    # ------------------------------------------------------------ emission
+
+    def set_emission(self, on: bool) -> str:
+        """Ask for emission On or Off; return what the device now says it was
+        asked for. The emission itself follows within seconds - its real
+        state is systemStatus bit 31/30 (`emission_on`), not this reply."""
+        with self.lock:
+            self._set("generalControl/setEmission", {"v": "On" if on else "Off"})
+            return str(self.get("generalControl/setEmission"))
 
 
 # ------------------------------------------------------------------ decoding

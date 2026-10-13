@@ -72,8 +72,8 @@ dashboard.
 **It writes to three instruments.** The Lake Shore heater — setpoint and range, on
 output 1 — both CAEN supplies: `VSET` per channel, and energising a channel
 on or off — and the residual gas analyser: control, scan setup, start and stop,
-from the [RGA page](../drivers/rga.md). It never switches the analyser's
-emission. How to drive either is in
+and emission On/Off behind a p105 guard, from the [RGA page](../drivers/rga.md).
+It never touches the analyser's electron multiplier or ion source. How to drive either is in
 [The web interface](webui.md#control); the same commands exist as
 `xams-ctl hv-set`, `hv-standby`, `hv-on`, `hv-off` and `flow-reset`.
 

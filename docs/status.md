@@ -239,5 +239,5 @@ Then, roughly in order of how much it matters:
 | **Replace the `tt202` sensor** | Then `enabled: true` in `channels.yaml` and `xams-ctl reload`. Nothing else changes. |
 | **Rotate the MessageBird key** | It sat in plaintext in three copies on the Desktop for years. Update `secrets.yaml` and the LabVIEW scripts together while LabVIEW is still the fallback. |
 | **Alarm thresholds for the remaining channels, and the response to each** | A threshold without a prescribed action is half the information (§14). [Operating](operating/index.md) has the section waiting. |
-| **RGA (PrismaPro)** — steps 0–2 deployed 13 Oct: status, control, scans, Save, `rga_summary` (`/rga`) | Next: emission from the page with a p105 guard (< 5 × 10⁻⁴ mbar), then a Grafana dashboard. Plan and status: [RGA](drivers/rga.md). |
+| **RGA (PrismaPro)** — steps 0–2 deployed 13 Oct (status, control, scans, Save, `rga_summary`); step 3 (emission On/Off with the p105 guard) built, not deployed, first emission-on run in the lab | Then a Grafana dashboard; the electron multiplier later. Plan and status: [RGA](drivers/rga.md). |
 | **Milestone 3's empirical check** | Readings agree with LabVIEW, which cannot catch a tag that was already on the wrong channel *in* LabVIEW. Warming one sensor at a time and watching which value moves is the only thing that can. |

@@ -9,8 +9,9 @@ hardware ID, then the instrument is asked who it is.
 Three exceptions to "none of them write", all deliberate and all narrow: the
 [Lake Shore](lakeshore.md) writes a setpoint and a heater range on output 1,
 the [CAEN](caen.md) driver writes `VSET`, `ON` and `OFF`, and the
-[RGA](rga.md) driver takes and releases control and sets up, starts and stops
-scans - through a whitelist that does not contain emission. Everything else
+[RGA](rga.md) driver takes and releases control, sets up, starts and stops
+scans and switches emission On or Off - through a whitelist, behind a p105
+guard. Everything else
 in this directory only reads.
 
 ---

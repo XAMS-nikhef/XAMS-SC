@@ -1354,7 +1354,7 @@ Imported records are tagged `"src":"labview"` so they are distinguishable from d
 4. **Restart never actuates** (§6.1).
 5. **Every write is logged** — who, what, when, previous value, new value — to an append-only audit file and to `xams/ack/#`.
 
-**The RGA (added 13 October 2026, [drivers/rga.md](drivers/rga.md)).** The third instrument written to: control, scan setup, start and stop, through a whitelist that does not contain emission. Rule 1 holds for it too: its protection against pressure is the analyser's own emission over-pressure trip, in the instrument. The p105 check planned for when emission is added is a **software guard** on top of that — it refuses to switch emission on and switches it off on a rising p105 — and must not be described as an interlock.
+**The RGA (added 13 October 2026, [drivers/rga.md](drivers/rga.md)).** The third instrument written to: control, scan setup, start and stop, and emission On/Off, through a whitelist. Rule 1 holds for it too: its protection against pressure is the analyser's own emission over-pressure trip, in the instrument. The p105 check is a **software guard** on top of that — it refuses to switch emission on and switches it off on a rising or missing p105 — and must not be described as an interlock.
 
 ### Command flow
 

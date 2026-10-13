@@ -1,10 +1,11 @@
 # Residual gas analyser (PrismaPro)
 
-!!! warning "Partly built: no emission control"
+!!! warning "Partly built: Faraday cup only"
     This page is the implementation plan and the record of what is built.
-    Steps 0-2 are done and deployed (13 October 2026): status, control,
-    scans and Save. Nothing here can switch emission. See
-    [Steps](#steps).
+    Steps 0-2 are deployed (13 October 2026): status, control, scans and
+    Save. Step 3, emission On/Off behind the p105 guard, is built; its first
+    run with emission on is to be done together in the lab. The electron
+    multiplier is a later stage. See [Steps](#steps).
 
 Pfeiffer PrismaPro QMG 250 on the pre-volume, on the lab Ethernet. Used
 occasionally, until now with Pfeiffer's PV MassSpec. The plan is an RGA
@@ -187,6 +188,62 @@ four audit records.
 
 ---
 
+## What is built (step 3, 13 October 2026)
+
+**Emission On/Off** from the RGA page. The whitelist gains exactly one target,
+`generalControl/setEmission`, with exactly two values, `On` and `Off`
+(`prismapro.EMISSION_VALUES`). The electron multiplier (`setEM`), filament
+selection, degas and the ion-source settings stay outside it.
+
+**On** is refused unless all of these hold, each refusal saying why:
+
+- this system holds the analyser;
+- the **p105 guard** allows it: `p105` received, quality `ok`, in mbar, at
+  most `guard_max_age_s` (30 s) old, and below `guard_limit_mbar`
+  (5 × 10⁻⁴ mbar);
+- the analyser reports no hardware errors;
+- its emission interlock (systemStatus bit 27) is not active.
+
+The reply is read back (`setEmission` must say `On`); the real state follows in
+seconds and is the `rga_emission` channel (systemStatus bit 31/30), not the
+request. **Off** needs only control.
+
+**The watchdog** runs every read cycle while emission is on and this system
+holds the analyser, and only ever switches emission **off** (audited as actor
+`rga service`, the reason shown on the page):
+
+- p105 at or above the limit → off at once, no grace;
+- p105 missing or stale → off after `guard_grace_s` (60 s) on top of the 30 s;
+- no scan or command for `emission_idle_off_s` (1 h) → off.
+
+Emission switched on by another client (PV MassSpec) is left alone: without
+control nothing can be written, and that is the other client's to look after.
+
+**Never left on behind the service:** *Release control* switches emission off
+first; control is not given up automatically while emission is on (so the
+watchdog keeps the means to act); a stopping service switches it off before
+releasing.
+
+**Commands run on a worker thread.** The MQTT thread only queues them, so an
+analyser call taking seconds can no longer stall what the service publishes
+(the hang of 13 October 2026).
+
+**The page** now has two rows: the instrument and its state side by side, and
+below them a *Controls* panel (control, emission, scan, Save) to the left of
+the spectrum. The p105 value, its age and the limit are shown in the state
+card; the reason the guard gives is shown under the emission button, which
+is disabled while the guard says no.
+
+Settings, all in `devices.yaml` `rga:` with these defaults: `guard_channel`
+`p105`, `guard_limit_mbar` 5e-4, `guard_max_age_s` 30, `guard_grace_s` 60,
+`emission_idle_off_s` 3600, `release_idle_s` 300.
+
+**Not yet tested with emission on.** Tests (fake analyser): 78 for the RGA,
+full suite 1065. The first emission-on run is for the lab, together: take
+control → Emission ON → `quick` → Save → Emission OFF → Release.
+
+---
+
 ## The API, in short
 
 Plain HTTP GET on port 80, JSON back. `/mmsp/<group>/<target>/get`, or
@@ -240,7 +297,7 @@ PrismaPro ◄─HTTP─► rga service (own process) ──MQTT──► web UI:
 | File | What | Knows MQTT? |
 |---|---|---|
 | `devices/prismapro.py` | HTTP client (one connection, error events, timeouts; built, read-only), later: whitelist of writable targets, control take/keep/release, recipe → `scanSetup` | no — usable from a notebook |
-| `devices/rga.py` | the service: identity check, state on the bus, commands from the bus, live scans to the page, Save, emission watchdog, p105 interlock | yes |
+| `devices/rga.py` | the service: identity check, state on the bus, commands from the bus (worker thread), live scans to the page, Save, emission watchdog, p105 guard | yes |
 | `rga_file.py` | JSON writer, `load_rga(path)`, summary extraction — shared by the service, the rebuild tool and analysis | no |
 | `sinks/` | `rga_summary` rows on "saved" events; rebuild from `data/rga/` | — |
 | `api/templates/rga.html` | the RGA page | — |
@@ -291,19 +348,22 @@ the HTTP equivalent of `*IDN?`.
 
 - **Emission only from the page's emission button**, with a confirmation.
   Never from a recipe, never from an alarm. The only automatic action is *off*.
-- **p105 interlock: the RGA may be operated only with p105 below
-  5 × 10⁻⁴ mbar** (= 3.75 × 10⁻⁴ Torr). The service subscribes to p105:
+- **p105 guard: the RGA may be operated only with p105 below
+  5 × 10⁻⁴ mbar** (= 3.75 × 10⁻⁴ Torr). A software guard on top of the
+  analyser's own trip, not an interlock (DESIGN.md §10 rule 1). The service
+  subscribes to p105:
     - before emission on: refuse if p105 is missing, stale or at or above the limit;
     - during operation: p105 at or above the limit → emission off at once;
-    - p105 stale: a short grace period, then emission off;
-    - every interlock action audited.
+    - p105 stale: a grace period (60 s), then emission off;
+    - every guard action audited. Details: [step 3](#what-is-built-step-3-13-october-2026).
 - **Caveat:** p105 is measured at the turbo; the RGA is on the pre-volume with
   valves in between. With a valve closed, p105 can be low while the RGA sees
   more. The device's own over-pressure trip stays the last line of defence;
   this system reads its settings and never changes them.
 - **Writable targets are a whitelist** in `prismapro.py`: control and lock,
-  `clientName`, `scanSetup`, `setEmission`. Never `sensorIonSource`,
-  `shutdown`, firmware, network, IO, `userDB`, degas or EM settings. Every write
+  `clientName`, `scanSetup`, `setEmission` (On/Off only). Never
+  `sensorIonSource`, `setEM`, `shutdown`, firmware, network, IO, `userDB` or
+  degas. Every write
   is checked, read back, acknowledged on the bus and audited, as for `VSET`.
 - **Never `force` without an operator choosing it**, and control is released
   when the service is idle, so PV MassSpec can still be used.
@@ -319,13 +379,13 @@ the HTTP equivalent of `*IDN?`.
    [What is built](#what-is-built-step-1-13-october-2026)).
 2. **Control, scans, Save** — built and deployed 13 October 2026 (see
    [What is built](#what-is-built-step-2-13-october-2026)).
-3. **Emission:** button with confirmation, pre-checks, watchdog, audit. First
-   real test together in the lab.
+3. **Emission On/Off with the p105 guard** (steps 3 and 5 of the original
+   plan, done together) — built 13 October 2026, not yet deployed, first
+   emission-on run in the lab (see
+   [What is built](#what-is-built-step-3-13-october-2026)).
 4. **Grafana:** its own dashboard on `rga_summary`; a file browser on the page.
-5. **p105 guard:** `p105` (cDAQ `9207/ai7`, mbar) is already a channel,
-   so this follows step 3 directly. A software guard, not an interlock in
-   the sense of DESIGN.md §10 rule 1: the analyser's own over-pressure trip
-   is the protection; this only refuses emission and switches it off early.
+5. **Electron multiplier** (CDEM, ~100-1000× the Faraday cup's signal): later.
+   On only with emission on and a low pressure, off before emission off.
 6. **Later:** trend mode; analysis helpers.
 
 **Decided in step 2:** values stored as the device gives them (A); pressures in
