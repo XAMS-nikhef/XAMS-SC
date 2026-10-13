@@ -46,7 +46,9 @@ from fastapi.responses import (HTMLResponse, JSONResponse, PlainTextResponse,
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from ..bus import (ACK_HV_CLEAR, ACK_HV_OUTPUT, ACK_HV_VSET, ACK_LS_RANGE,
+from ..bus import (ACK_RGA_CONTROL, ACK_RGA_SAVE, ACK_RGA_SCAN,
+                   TOPIC_RGA_CONTROL, TOPIC_RGA_SAVE, TOPIC_RGA_SCAN,
+                   ACK_HV_CLEAR, ACK_HV_OUTPUT, ACK_HV_VSET, ACK_LS_RANGE,
                    ACK_LS_SETPOINT, ACK_NOTIFY, TOPIC_AUDIT, TOPIC_HV_CLEAR,
                    TOPIC_HV_OUTPUT, TOPIC_HV_VSET, TOPIC_LS_RANGE, TOPIC_LS_SETPOINT,
                    TOPIC_NOTIFY, TOPIC_RELOAD, Bus)
@@ -306,6 +308,14 @@ def _redirect_hv(error: str | None, ok: str | None = None):
     if error:
         return RedirectResponse("/hv?hv_error=" + quote(error), status_code=303)
     return RedirectResponse("/hv?hv_ok=" + quote(ok or "done"), status_code=303)
+
+
+def _redirect_rga(error: str | None, ok: str | None = None):
+    """Back to the RGA page, carrying what happened (POST then redirect)."""
+    from urllib.parse import quote
+    if error:
+        return RedirectResponse("/rga?error=" + quote(error), status_code=303)
+    return RedirectResponse("/rga?ok=" + quote(ok or "done"), status_code=303)
 
 
 def _redirect_ls(error: str | None, ok: str | None = None):
@@ -802,7 +812,58 @@ def create_app(broker: str = "127.0.0.1", port: int = 1883, *,
                     "on": [name for name, on in decode_system_status(word).items() if on],
                     "named": len(SYSTEM_STATUS_BITS)}
         return page(request, "rga.html", info=state.rga_info(),
-                    channels=channels, bits=bits)
+                    channels=channels, bits=bits,
+                    ok=request.query_params.get("ok"),
+                    error=request.query_params.get("error"))
+
+    # The RGA's writes live on its own page, not on Control: they are one
+    # workflow - take it, scan, look, save, give it back - around a plot, and
+    # splitting them from the spectrum they act on would serve nobody. The
+    # page is still a thin form: validation, the read-back and the audit
+    # record are all in the RGA service, as for every other instrument.
+
+    @app.post("/rga/control")
+    def rga_control(request: Request, action: str = Form(""),
+                    force: str = Form(""), by: str = Form("")):
+        who = operator_of(request, by)
+        result = state.command(TOPIC_RGA_CONTROL, ACK_RGA_CONTROL,
+                               {"action": action, "force": force == "yes", "by": who},
+                               timeout_s=15.0)
+        if result.get("ok"):
+            return _redirect_rga(None, "control " + result.get("detail", action))
+        return _redirect_rga(result.get("reason", "refused"))
+
+    @app.post("/rga/scan")
+    def rga_scan_command(request: Request, action: str = Form(""),
+                         recipe: str = Form(""), by: str = Form("")):
+        who = operator_of(request, by)
+        result = state.command(TOPIC_RGA_SCAN, ACK_RGA_SCAN,
+                               {"action": action, "recipe": recipe, "by": who},
+                               timeout_s=20.0)
+        if result.get("ok"):
+            return _redirect_rga(None, result.get("detail", action))
+        return _redirect_rga(result.get("reason", "refused"))
+
+    @app.post("/rga/save")
+    def rga_save(request: Request, comment: str = Form(""), tags: str = Form(""),
+                 background: str = Form(""), by: str = Form("")):
+        who = operator_of(request, by)
+        tag_list = [t.strip() for t in tags.replace(";", ",").split(",") if t.strip()]
+        result = state.command(TOPIC_RGA_SAVE, ACK_RGA_SAVE,
+                               {"comment": comment.strip(), "tags": tag_list,
+                                "background": background.strip(), "by": who},
+                               timeout_s=15.0)
+        if result.get("ok"):
+            return _redirect_rga(None, result.get("detail", "saved"))
+        return _redirect_rga(result.get("reason", "refused"))
+
+    @app.get("/api/rga/scan")
+    def api_rga_scan():
+        """The latest scan of the running acquisition, for the live plot.
+        Empty object when there is none."""
+        import json as _json
+        text = state.rga_scan()
+        return JSONResponse(_json.loads(text) if text else {})
 
     @app.get("/hv", response_class=HTMLResponse)
     def high_voltage(request: Request):

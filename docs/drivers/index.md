@@ -6,9 +6,11 @@ right one, read it on a schedule, and publish. None of them write.
 Device resolution **never uses a COM number**. Candidates are narrowed by USB
 hardware ID, then the instrument is asked who it is.
 
-Two exceptions to "none of them write", both deliberate and both narrow: the
+Three exceptions to "none of them write", all deliberate and all narrow: the
 [Lake Shore](lakeshore.md) writes a setpoint and a heater range on output 1,
-and the [CAEN](caen.md) driver writes `VSET`, `ON` and `OFF`. Everything else
+the [CAEN](caen.md) driver writes `VSET`, `ON` and `OFF`, and the
+[RGA](rga.md) driver takes and releases control and sets up, starts and stops
+scans - through a whitelist that does not contain emission. Everything else
 in this directory only reads.
 
 ---

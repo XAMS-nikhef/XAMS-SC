@@ -32,7 +32,7 @@ REPO_CONFIG = config_module.ROOT / "config"
 
 # Every page that has a form on it. A page missing from here is a page whose
 # buttons nothing checks, so it is asserted below that each one was reachable.
-PAGES = ("/", "/alarms", "/hv", "/hv/defaults", "/status", "/mimic")
+PAGES = ("/", "/alarms", "/hv", "/hv/defaults", "/status", "/mimic", "/rga")
 
 HANDLER = re.compile(r"""onsubmit=(?P<q>["'])(?P<body>.*?)(?P=q)""", re.S)
 

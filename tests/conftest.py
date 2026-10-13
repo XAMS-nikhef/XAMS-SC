@@ -42,7 +42,7 @@ def config_dir(tmp_path, monkeypatch):
     """A copy of the real configuration, so a test never writes into git."""
     d = tmp_path / "config"
     d.mkdir()
-    for name in ("channels.yaml", "devices.yaml", "alarms.yaml"):
+    for name in ("channels.yaml", "devices.yaml", "alarms.yaml", "rga_recipes.yaml"):
         shutil.copy(REPO_CONFIG / name, d / name)
     # ALWAYS the template, never config/recipients.yaml. That file holds real
     # colleagues' names and mobile numbers, it is gitignored, and a fresh clone

@@ -3,9 +3,13 @@
 This module knows HTTP and the PrismaPro, and nothing about MQTT, so it can be
 used from a notebook as well as from the service in `rga.py`.
 
-**THIS CLIENT ONLY READS.** There is no `set` here yet: step 1 of the RGA plan
-is status only. Writes (control, scan setup, emission) arrive in step 2 and 3,
-behind a whitelist of targets - not as a general-purpose `set(path, value)`.
+**WRITES ARE A WHITELIST, NOT A FUNCTION.** There is no general-purpose
+`set(path, value)`. `MMSPClient` reads; `MMSPControl` (below) adds the few
+writes the RGA plan needs, each built from a fixed target in `WRITABLE`:
+taking and releasing control, and setting up, starting and stopping a scan.
+Emission, the electron multiplier, the ion source, degas, IO, network and
+firmware are not in it and cannot be reached from here. Emission arrives in
+step 3 of the plan, as one more entry, deliberately.
 
 The protocol, as found on our unit (firmware 1.9.5, 13 October 2026):
 
@@ -21,6 +25,10 @@ The protocol, as found on our unit (firmware 1.9.5, 13 October 2026):
     worked every time. So this client keeps ONE keep-alive connection open,
     leaves a small gap between requests, and on a failure closes it and tries
     exactly once more on a fresh one.
+  * A write answers `"name": "wasSet"` with what the device now holds; a
+    sweep channel reports `reportUnits: "Current"`, so scan values are ion
+    currents in AMPERE. While a scan runs, systemStatus bit 1 is set.
+    (Live test with control taken, emission off, 13 October 2026.)
 """
 
 from __future__ import annotations
@@ -28,8 +36,10 @@ from __future__ import annotations
 import http.client
 import json
 import logging
+import threading
 import time
 from dataclasses import dataclass
+from urllib.parse import quote
 
 log = logging.getLogger(__name__)
 
@@ -49,6 +59,10 @@ class MMSPClient:
         self.min_gap_s = min_gap_s
         self._conn: http.client.HTTPConnection | None = None
         self._last = 0.0
+        # One connection, two threads: the service loop reads, and commands
+        # arrive on the MQTT thread. A request and its reply must not be
+        # interleaved with another's, so every request holds this.
+        self.lock = threading.RLock()
 
     def _connection(self) -> http.client.HTTPConnection:
         if self._conn is None:
@@ -65,6 +79,10 @@ class MMSPClient:
             self._conn = None
 
     def _request(self, path: str) -> bytes:
+        with self.lock:
+            return self._request_locked(path)
+
+    def _request_locked(self, path: str) -> bytes:
         wait = self.min_gap_s - (time.monotonic() - self._last)
         if wait > 0:
             time.sleep(wait)
@@ -85,11 +103,12 @@ class MMSPClient:
         A broken connection is retried once on a fresh one; the device closing
         a kept-alive connection is normal, not a fault.
         """
-        try:
-            body = self._request(path)
-        except (OSError, http.client.HTTPException):
-            self.close()
-            body = self._request(path)
+        with self.lock:
+            try:
+                body = self._request(path)
+            except (OSError, http.client.HTTPException):
+                self.close()
+                body = self._request(path)
         if not body.strip():
             # What a dropped request looks like: a 200 with nothing in it.
             raise MMSPError(f"{path}: empty reply")
@@ -107,6 +126,122 @@ class MMSPClient:
             ids = ", ".join(str(c.get("id")) for c in conditions) or event.get("name")
             raise MMSPError(f"{target}: {ids}")
         return event.get("data")
+
+
+# ------------------------------------------------------------------ writing
+
+# Every target this code may write, and nothing else. A path not built from
+# one of these cannot be sent: `MMSPControl._set` refuses it.
+WRITABLE = frozenset({
+    "communication/clientName",
+    "communication/control",
+    "communication/controlLock",
+    "scanSetup",                 # startChannel, stopChannel, scanCount, scanStart, scanStop
+    "scanSetup/channels/{n}",    # channelMode, startMass, stopMass, ppamu, dwell, enabled
+})
+
+# The fields of scanSetup and of a channel that may be set.
+SCAN_FIELDS = frozenset({"startChannel", "stopChannel", "scanCount",
+                         "scanStart", "scanStop"})
+CHANNEL_FIELDS = frozenset({"channelMode", "startMass", "stopMass", "ppamu",
+                            "dwell", "enabled"})
+
+
+class ControlRefused(MMSPError):
+    """Somebody else holds the analyser, and taking it was not asked for."""
+
+
+class MMSPControl(MMSPClient):
+    """The client plus the whitelisted writes of the RGA plan."""
+
+    def _set(self, target: str, fields: dict) -> dict:
+        """Write `fields` to one whitelisted target; return what it now holds."""
+        template = ("scanSetup/channels/{n}"
+                    if target.startswith("scanSetup/channels/") else target)
+        if template not in WRITABLE:
+            raise PermissionError(f"{target} is not writable from this code")
+        allowed = (CHANNEL_FIELDS if template == "scanSetup/channels/{n}"
+                   else SCAN_FIELDS if template == "scanSetup" else None)
+        if allowed is not None and not set(fields) <= allowed:
+            raise PermissionError(
+                f"{target}: fields {sorted(set(fields) - allowed)} are not writable")
+        if allowed is None:
+            # A bare value: /communication/control/set?force
+            (value,) = fields.values()
+            query = quote(str(value), safe="")
+        else:
+            query = "&".join(f"{k}={quote(str(v), safe='')}" for k, v in fields.items())
+        event = self.raw(f"/mmsp/{target}/set?{query}")
+        if event.get("name") != "wasSet":
+            conditions = event.get("conditions") or []
+            ids = ", ".join(str(c.get("id")) for c in conditions) or event.get("name")
+            raise MMSPError(f"{target}: {ids}")
+        return event.get("data")
+
+    # ------------------------------------------------------------- control
+
+    def take_control(self, client_name: str, force: bool = False) -> dict:
+        """Take the analyser (flowchart, firmware >= 1.9.0).
+
+        Refused if another client holds it, unless `force` - which takes it
+        away from PV MassSpec or a browser mid-measurement, so it is only
+        ever passed when an operator chose it.
+        """
+        with self.lock:
+            info = self.get("communication/controlInfo") or {}
+            if info.get("amInControl"):
+                return info
+            if info.get("controlled") and not force:
+                raise ControlRefused(
+                    "the RGA is held by %r from %s" % (
+                        info.get("clientName") or "another client",
+                        info.get("ipAddress") or "?"))
+            self._set("communication/clientName", {"v": client_name})
+            # "force" is the API's word for "take", whether or not anybody
+            # held it; the refusal above is what keeps it polite.
+            self._set("communication/control", {"v": "force"})
+            self._set("communication/controlLock", {"v": "Session"})
+            info = self.get("communication/controlInfo") or {}
+            if not info.get("amInControl"):
+                raise MMSPError("asked for control, but the RGA does not say "
+                                "this session holds it")
+            return info
+
+    def release_control(self) -> dict:
+        with self.lock:
+            self._set("communication/controlLock", {"v": "Unlocked"})
+            self._set("communication/control", {"v": "release"})
+            return self.get("communication/controlInfo") or {}
+
+    # ---------------------------------------------------------------- scans
+
+    def setup_scan(self, channels: list[dict], count: int) -> None:
+        """Load a recipe's channels into slots 1..n and set the scan count.
+
+        `channels` are already validated (`rga_file.validate_recipe`); this
+        only translates them.
+        """
+        with self.lock:
+            self.stop_scan()
+            for n, ch in enumerate(channels, start=1):
+                target = f"scanSetup/channels/{n}"
+                if ch["mode"] == "sweep":
+                    self._set(target, {"channelMode": "Sweep",
+                                       "startMass": ch["start"], "stopMass": ch["stop"]})
+                    self._set(target, {"dwell": ch["dwell"], "ppamu": ch["ppamu"],
+                                       "enabled": "True"})
+                else:
+                    self._set(target, {"channelMode": "Single", "startMass": ch["mass"]})
+                    self._set(target, {"dwell": ch["dwell"], "ppamu": 1,
+                                       "enabled": "True"})
+            self._set("scanSetup", {"startChannel": 1, "stopChannel": len(channels)})
+            self._set("scanSetup", {"scanCount": int(count)})
+
+    def start_scan(self) -> None:
+        self._set("scanSetup", {"scanStart": 1})
+
+    def stop_scan(self) -> None:
+        self._set("scanSetup", {"scanStop": "Immediately"})
 
 
 # ------------------------------------------------------------------ decoding
@@ -130,6 +265,7 @@ SYSTEM_STATUS_BITS = {
     11: "baseline_continuous_scheduled",
     10: "baseline_single_scheduled",
     9: "baseline_correction",
+    1: "scanning",               # seen set during a scan, 13 October 2026
 }
 
 

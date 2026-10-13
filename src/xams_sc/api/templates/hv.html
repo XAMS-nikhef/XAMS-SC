@@ -41,6 +41,11 @@
   <strong>The derived service did not acknowledge.</strong> Nothing was reset.
   </div>{% endif %}
 
+{# The one exception to "every write is on this page": the RGA's control,
+   scans and Save are on /rga, beside the spectrum they act on. #}
+<p class="dim" style="margin:0 0 1rem 0">The residual gas analyser (control,
+  scans, Save) is on its own page: <a href="/rga">RGA</a>.</p>
+
 {# Side by side: two small cards, and stacking them pushed the high voltage
    below the fold on a laptop. They fold back to one column when the window
    is too narrow to hold both without squeezing. #}

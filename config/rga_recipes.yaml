@@ -1,0 +1,48 @@
+# RGA recipes (docs/drivers/rga.md). Each is loaded into the analyser's scan
+# channels 1..n when a scan starts. Validated at startup by
+# rga_file.validate_recipe: a recipe outside the bounds there is refused,
+# never clipped.
+#
+#   mode: sweep   start, stop (amu), ppamu (points per amu), dwell (ms/point)
+#   mode: single  mass (amu), dwell (ms)
+#   scans         how many scans one acquisition takes (1-100); all are kept
+#                 in the saved file, plus their mean
+#
+# Scan time ~ points x dwell. A sweep has 1 + (stop - start) x ppamu points.
+#
+# NO RECIPE SWITCHES EMISSION ON. Starting a scan only scans; with emission
+# off the values are the detector's noise (about 1e-14 A), which is what the
+# background scan is.
+
+recipes:
+
+  survey:
+    description: "full range 1-200 amu, ~32 s per scan"
+    scans: 3
+    channels:
+      - {mode: sweep, start: 1, stop: 200, ppamu: 10, dwell: 16}
+
+  air_leak:
+    description: "H2, He, N, H2O, N2/CO, O2, Ar, CO2 - air-leak check, ~2 s per scan"
+    scans: 10
+    channels:
+      - {mode: single, mass: 2, dwell: 256}
+      - {mode: single, mass: 4, dwell: 256}
+      - {mode: single, mass: 14, dwell: 256}
+      - {mode: single, mass: 18, dwell: 256}
+      - {mode: single, mass: 28, dwell: 256}
+      - {mode: single, mass: 32, dwell: 256}
+      - {mode: single, mass: 40, dwell: 256}
+      - {mode: single, mass: 44, dwell: 256}
+
+  xenon:
+    description: "Xe+ isotopes 124-136 amu, ~4 s per scan"
+    scans: 5
+    channels:
+      - {mode: sweep, start: 124, stop: 136, ppamu: 10, dwell: 32}
+
+  quick:
+    description: "1-50 amu, ~6 s per scan - the setup tested on 13 October 2026"
+    scans: 2
+    channels:
+      - {mode: sweep, start: 1, stop: 50, ppamu: 4, dwell: 32}

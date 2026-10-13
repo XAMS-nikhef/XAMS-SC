@@ -31,6 +31,11 @@ INSTRUMENT_WRITES = ('action="/hv/apply"', 'action="/hv/output"',
                      'action="/lakeshore/setpoint"', 'action="/lakeshore/range"',
                      'action="/flow/reset"')
 
+#: The RGA's writes, which live on its own page by design: take it, scan,
+#: look at the spectrum, save, give it back is one workflow around one plot
+#: (docs/drivers/rga.md). None of them reaches emission.
+RGA_WRITES = ('action="/rga/control"', 'action="/rga/scan"')
+
 PAGES = ("/", "/status", "/hv", "/hv/defaults", "/rga", "/system", "/alarms", "/logs")
 
 
@@ -76,6 +81,17 @@ class TestNoPageHasTwoJobs:
 
         for action in INSTRUMENT_WRITES:
             assert action in body, f"{action} is not on the Control page"
+
+    def test_the_rga_writes_are_on_the_rga_page_and_nowhere_else(self, client):
+        body = client.get("/rga").text
+        for action in RGA_WRITES:
+            assert action in body, f"{action} is not on the RGA page"
+        for path in ("/", "/system", "/status"):
+            other = client.get(path).text
+            assert not [a for a in RGA_WRITES if a in other], path
+
+    def test_control_points_at_the_rga_page(self, client):
+        assert 'href="/rga"' in client.get("/hv").text
 
     def test_control_still_explains_what_it_will_not_do(self, client):
         """The §10a limits — no enable, no MAXV, no TRIP. That is the text

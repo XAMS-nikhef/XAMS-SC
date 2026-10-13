@@ -76,3 +76,28 @@ CREATE TABLE IF NOT EXISTS audit (
 );
 
 CREATE INDEX IF NOT EXISTS audit_t_idx ON audit (t DESC);
+
+-- RGA: one row per Save, and one per summary mass of it (docs/drivers/rga.md,
+-- "Data"). The spectra themselves are never in the database: each Save is one
+-- JSON file in data/rga/, and these tables are an index over those files.
+-- Rebuilt from them with tools/rga_rebuild_summary.py; the keys make that, and
+-- a replayed record, harmless.
+CREATE TABLE IF NOT EXISTS rga_saves (
+    t                   timestamptz NOT NULL,
+    file                text        PRIMARY KEY,
+    recipe              text        NOT NULL,
+    tags                text,
+    comment             text,
+    total_pressure_mbar double precision
+);
+
+CREATE TABLE IF NOT EXISTS rga_summary (
+    t          timestamptz      NOT NULL,      -- the Save, as in rga_saves
+    file       text             NOT NULL,
+    mass       double precision NOT NULL,      -- amu
+    current_a  double precision,               -- ion current, A (mean of the scans)
+    pp_mbar    double precision,               -- partial pressure, device's own sensitivity
+    PRIMARY KEY (file, mass)
+);
+
+CREATE INDEX IF NOT EXISTS rga_summary_mass_t_idx ON rga_summary (mass, t DESC);

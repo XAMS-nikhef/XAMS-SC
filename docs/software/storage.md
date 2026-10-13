@@ -191,6 +191,15 @@ migration instead of starting from zero — and a query can still exclude it.
 
 ---
 
+## RGA measurement files
+
+Not from the bus either. The RGA service writes one JSON file per **Save**,
+`data/rga/YYYY/<start>_<recipe>.json`, with every scan, their mean and the
+analyser's settings; nothing else of a spectrum is stored anywhere. The
+`rga_saves` and `rga_summary` tables are an index over those files, filled
+from `xams/rga/saved` by `sinks/rga_writer.py` and rebuilt from the files with
+`tools/rga_rebuild_summary.py`. See [RGA](../drivers/rga.md#data).
+
 ## Flight recorder files
 
 Not a sink, but it writes: the alarm service keeps the last ten minutes of

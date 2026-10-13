@@ -14,8 +14,11 @@ import pytest
 from doubles import RecordingBus
 from xams_sc.bus import TOPIC_MEAS, TOPIC_RGA_INFO
 from xams_sc.config import load
+from xams_sc import rga_file
 from xams_sc.devices import prismapro, rga
-from xams_sc.devices.prismapro import (MMSPClient, MMSPError, decode_system_status,
+from xams_sc.sinks import rga_writer
+from xams_sc.devices.prismapro import (WRITABLE, ControlRefused, MMSPClient,
+                                       MMSPControl, MMSPError, decode_system_status,
                                        emission_on, read_identity)
 from xams_sc.devices.rga import CONTROL_NONE, CONTROL_OTHER, READERS, RgaService
 from xams_sc.model import Measurement, Quality, utcnow
@@ -25,7 +28,7 @@ RECORDED = json.loads(
     .read_text(encoding="utf-8"))
 
 
-class RecordedClient(MMSPClient):
+class RecordedClient(MMSPControl):
     """The real client, with the network replaced by the recording."""
 
     def __init__(self, *args, replies=None, **kw):
@@ -84,12 +87,9 @@ class TestClient:
         with pytest.raises(OSError):
             client.get("status/hardwareErrors")
 
-    def test_the_client_has_no_way_to_write(self):
-        """Step 1 is status only. A write path is added deliberately, later,
-        behind a whitelist - it must not already be lying here."""
-        source = inspect.getsource(prismapro)
-        assert not [n for n in dir(MMSPClient) if n.startswith(("set", "put", "post"))]
-        assert "/set" not in source and '"POST"' not in source
+    def test_the_reader_has_no_way_to_write(self):
+        """MMSPClient reads. Writing is MMSPControl's, through a whitelist."""
+        assert not [n for n in dir(MMSPClient) if n.startswith(("set", "_set", "put", "post"))]
 
 
 class TestDecoding:
@@ -121,7 +121,7 @@ def build(monkeypatch, replies=None, devices=None):
     config = load()
     if devices is not None:
         config.devices["rga"] = devices
-    monkeypatch.setattr(rga, "MMSPClient",
+    monkeypatch.setattr(rga, "MMSPControl",
                         lambda *a, **kw: RecordedClient(*a, replies=replies, **kw))
     return RgaService(config, RecordingBus(),
                       lock_dir=pathlib.Path(tempfile.mkdtemp()))
@@ -185,7 +185,7 @@ class TestRead:
         assert values["rga_control"] == CONTROL_OTHER
         control = service.bus.last_json(TOPIC_RGA_INFO)["control"]
         assert control == {"controlled": True, "client": "PVMassSpec",
-                           "ip": "192.16.192.20", "locked": True}
+                           "ip": "192.16.192.20", "locked": True, "us": False}
 
     def test_one_unreadable_target_fails_the_whole_read(self, monkeypatch):
         """Raised, so the loop marks every channel bad - never a partial cycle
@@ -230,7 +230,316 @@ class TestPage:
         assert "another client" in body and "PVMassSpec" in body
         assert "0x01103B90" in body and "baseline_correction" in body
 
-    def test_the_page_writes_to_nothing(self, client):
-        """The site-wide operator box is on every page; nothing of the RGA's."""
+    def test_the_page_has_no_emission_control(self, client):
+        """Step 2: control, scans and Save. Emission is not on this page."""
+        body = client.get("/rga").text.lower()
+        assert "/rga/emission" not in body and "setemission" not in body
+
+
+# ================================================================ step 2
+#
+# A fake analyser that behaves as the real one did in the live test of
+# 13 October 2026: writes answer "wasSet", control is a session, a scan is
+# handed over once by nextScan, and systemStatus bit 1 is set while scanning.
+
+QUICK_POINTS = 197      # 1-50 amu at 4 per amu, as the device reported
+
+
+class FakeAnalyser(MMSPControl):
+    def __init__(self, *a, points=QUICK_POINTS, other=None, **kw):
+        super().__init__(*a, **kw)
+        self.min_gap_s = 0
+        self.points = points
+        self.control = {"controlled": bool(other), "amInControl": False,
+                        "locked": bool(other), "clientName": other,
+                        "ipAddress": "192.16.192.20" if other else "null"}
+        self.count = 0
+        self.queue: list[dict] = []
+        self.scanning = False
+        self.sets: list[str] = []
+
+    def _event(self, path, data, name="got"):
+        return json.dumps({"name": name, "origin": path, "data": data}).encode()
+
+    def _request(self, path):
+        if "/set?" in path:
+            self.sets.append(path)
+            target, query = path[len("/mmsp/"):].split("/set?")
+            if target == "communication/control":
+                mine = query == "force"
+                self.control.update(controlled=mine, amInControl=mine,
+                                    locked=mine and self.control["locked"],
+                                    clientName="xams-sc" if mine else None)
+            elif target == "communication/controlLock":
+                self.control["locked"] = query == "Session"
+            elif target == "scanSetup" and query.startswith("scanCount="):
+                self.count = int(query.split("=")[1])
+            elif target == "scanSetup" and query.startswith("scanStart"):
+                self.scanning = True
+                self.queue = [{"scannum": n, "scansize": self.points,
+                               "systemStatus": 0x01103B92,
+                               "values": [1e-14 * ((i % 7) - 3) for i in range(self.points)]}
+                              for n in range(1, self.count + 1)]
+            elif target == "scanSetup" and query.startswith("scanStop"):
+                self.scanning = False
+            return self._event(path, query, "wasSet")
+        target = path[len("/mmsp/"):-len("/get")]
+        if target == "communication/controlInfo":
+            return self._event(path, dict(self.control))
+        if target == "measurement/nextScan":
+            if self.queue:
+                d = self.queue.pop(0)
+                if not self.queue:
+                    self.scanning = False
+                return self._event(path, d)
+            return self._event(path, {"values": None, "systemStatus":
+                                      0x01103B92 if self.scanning else 0x01103B90})
+        extra = {"sensorIonSource/emissionCurrent": 2000,
+                 "sensorIonSource/electronEnergy": 70,
+                 "sensorIonSource/ppSensitivityFactor": 0.000793007,
+                 "generalControl/setEM": "Off",
+                 "generalControl/setEmission": "Off",
+                 "measurement/totalPressure": 0}
+        if target in extra:
+            return self._event(path, extra[target])
+        reply = RECORDED.get(path)
+        if reply is None:
+            raise OSError(f"nothing recorded for {path}")
+        return json.dumps(reply).encode()
+
+
+@pytest.fixture
+def analyser():
+    return {}
+
+
+def running(monkeypatch, tmp_path, analyser, **fake):
+    """A service connected to a FakeAnalyser, writing files under tmp_path."""
+    config = load()
+    config.devices["rga"] = dict(config.devices["rga"], data_dir=str(tmp_path / "rga"),
+                                 release_idle_s=300)
+
+    def make(*a, **kw):
+        analyser["device"] = FakeAnalyser(*a, **fake, **kw)
+        return analyser["device"]
+
+    monkeypatch.setattr(rga, "MMSPControl", make)
+    monkeypatch.setattr(rga, "ROOT", pathlib.Path("/"))
+    service = RgaService(config, RecordingBus(), lock_dir=pathlib.Path(tempfile.mkdtemp()))
+    assert service.verify_identity()
+    service.read()
+    return service
+
+
+def command(service, handler, ack_topic, **payload):
+    getattr(service, handler)("", json.dumps({"by": "tester"} | payload))
+    return service.bus.last_json(ack_topic)
+
+
+def acquire(service, recipe="quick"):
+    assert command(service, "_handle_control", "xams/ack/rga/control", action="take")["ok"]
+    service.read()
+    ack = command(service, "_handle_scan", "xams/ack/rga/scan", action="start", recipe=recipe)
+    assert ack["ok"], ack
+    for _ in range(5):
+        service.read()
+    return ack
+
+
+class TestTheWhitelist:
+    def test_emission_and_the_ion_source_cannot_be_written(self):
+        assert not [t for t in WRITABLE if t.startswith(
+            ("generalControl", "sensorIonSource", "sensorDetector", "digital",
+             "analog", "userDB", "system"))]
+
+    @pytest.mark.parametrize("target", ["generalControl/setEmission",
+                                        "generalControl/setEM",
+                                        "sensorIonSource/emissionCurrent"])
+    def test_a_target_outside_it_is_refused_before_anything_is_sent(self, target):
+        device = FakeAnalyser("x")
+        with pytest.raises(PermissionError):
+            device._set(target, {"v": "On"})
+        assert device.sets == []
+
+    def test_an_unlisted_field_of_a_listed_target_is_refused(self):
+        device = FakeAnalyser("x")
+        with pytest.raises(PermissionError):
+            device._set("scanSetup", {"dwellGlobal": 1})
+        assert device.sets == []
+
+
+class TestControl:
+    def test_taking_a_free_analyser(self):
+        device = FakeAnalyser("x")
+        assert device.take_control("xams-sc")["amInControl"]
+        assert device.sets[-1].endswith("controlLock/set?Session")
+
+    def test_one_held_by_another_client_is_not_taken_unasked(self):
+        device = FakeAnalyser("x", other="PVMassSpec")
+        with pytest.raises(ControlRefused, match="PVMassSpec"):
+            device.take_control("xams-sc")
+        assert device.sets == []
+
+    def test_force_takes_it(self):
+        device = FakeAnalyser("x", other="PVMassSpec")
+        assert device.take_control("xams-sc", force=True)["amInControl"]
+
+    def test_the_service_refuses_politely_and_audits_it(self, monkeypatch, tmp_path, analyser):
+        service = running(monkeypatch, tmp_path, analyser, other="PVMassSpec")
+        ack = command(service, "_handle_control", "xams/ack/rga/control", action="take")
+        assert not ack["ok"] and "PVMassSpec" in ack["reason"]
+        audit = service.bus.last_json("xams/audit")
+        assert audit["action"] == "rga_control_take" and audit["result"] == "rejected"
+
+
+class TestScanAndSave:
+    def test_a_scan_needs_control_first(self, monkeypatch, tmp_path, analyser):
+        service = running(monkeypatch, tmp_path, analyser)
+        ack = command(service, "_handle_scan", "xams/ack/rga/scan",
+                      action="start", recipe="quick")
+        assert not ack["ok"] and "take control first" in ack["reason"]
+        assert not [p for p in analyser["device"].sets if "scanSetup" in p]
+
+    def test_an_unknown_recipe_is_refused(self, monkeypatch, tmp_path, analyser):
+        service = running(monkeypatch, tmp_path, analyser)
+        command(service, "_handle_control", "xams/ack/rga/control", action="take")
+        service.read()
+        ack = command(service, "_handle_scan", "xams/ack/rga/scan",
+                      action="start", recipe="nonsense")
+        assert not ack["ok"]
+
+    def test_the_recipe_is_loaded_as_the_device_was_set_up_by_hand(
+            self, monkeypatch, tmp_path, analyser):
+        service = running(monkeypatch, tmp_path, analyser)
+        acquire(service)
+        sets = analyser["device"].sets
+        assert "/mmsp/scanSetup/channels/1/set?channelMode=Sweep&startMass=1&stopMass=50" in sets
+        assert "/mmsp/scanSetup/channels/1/set?dwell=32&ppamu=4&enabled=True" in sets
+        assert "/mmsp/scanSetup/set?scanCount=2" in sets
+        assert sets[-1] == "/mmsp/scanSetup/set?scanStart=1"
+
+    def test_every_scan_is_collected_and_the_acquisition_ends(
+            self, monkeypatch, tmp_path, analyser):
+        service = running(monkeypatch, tmp_path, analyser)
+        acquire(service)
+        acq = service.bus.last_json("xams/rga/info")["acquisition"]
+        assert (acq["state"], acq["done"], acq["of"]) == ("done", 2, 2)
+        live = service.bus.last_json("xams/rga/scan")
+        assert len(live["values"]) == len(live["masses"]) == QUICK_POINTS
+        assert service.interval_s >= 5      # back to the slow status rate
+
+    def test_a_scan_of_the_wrong_length_is_not_recorded(
+            self, monkeypatch, tmp_path, analyser):
+        service = running(monkeypatch, tmp_path, analyser, points=100)
+        acquire(service)
+        acq = service.bus.last_json("xams/rga/info")["acquisition"]
+        assert acq["state"] == "failed" and acq["done"] == 0
+
+    def test_save_writes_one_file_and_publishes_its_summary(
+            self, monkeypatch, tmp_path, analyser):
+        service = running(monkeypatch, tmp_path, analyser)
+        acquire(service)
+        ack = command(service, "_handle_save", "xams/ack/rga/save",
+                      comment="emission off", tags=["background"])
+        assert ack["ok"], ack
+
+        files = rga_file.files(tmp_path / "rga")
+        assert [f.name for f in files] == [ack["file"]]
+        record = rga_file.load_rga(files[0])
+        assert record["units"] == "A" and record["tags"] == ["background"]
+        assert len(record["scans"]) == 2 and len(record["mean"]) == QUICK_POINTS
+        assert len(record["masses"]) == QUICK_POINTS
+        assert record["masses"][0] == 1 and record["masses"][-1] == 50
+        assert record["device"]["unit_to_mbar"] == pytest.approx(1.3332, rel=1e-3)
+        assert record["device"]["emission_state"] == "Off"
+
+        summary = service.bus.last_json("xams/rga/saved")
+        assert summary["file"] == ack["file"]
+        assert {p["mass"] for p in summary["peaks"]} == {2, 4, 18, 28, 32, 40, 44}
+        save_row, peak_rows = rga_writer.rows(summary)
+        assert save_row[1] == ack["file"] and len(peak_rows) == 7
+
+    def test_the_same_acquisition_is_not_saved_twice(self, monkeypatch, tmp_path, analyser):
+        service = running(monkeypatch, tmp_path, analyser)
+        acquire(service)
+        assert command(service, "_handle_save", "xams/ack/rga/save")["ok"]
+        ack = command(service, "_handle_save", "xams/ack/rga/save")
+        assert not ack["ok"] and "already saved" in ack["reason"]
+
+    def test_nothing_to_save_is_said(self, monkeypatch, tmp_path, analyser):
+        service = running(monkeypatch, tmp_path, analyser)
+        ack = command(service, "_handle_save", "xams/ack/rga/save")
+        assert not ack["ok"]
+
+
+class TestGivingItBack:
+    def test_control_is_released_after_the_idle_time(self, monkeypatch, tmp_path, analyser):
+        service = running(monkeypatch, tmp_path, analyser)
+        acquire(service)
+        service._last_activity -= 301
+        service.read()
+        assert analyser["device"].sets[-1] == "/mmsp/communication/control/set?release"
+
+    def test_not_while_a_scan_runs(self, monkeypatch, tmp_path, analyser):
+        service = running(monkeypatch, tmp_path, analyser)
+        command(service, "_handle_control", "xams/ack/rga/control", action="take")
+        service.read()
+        command(service, "_handle_scan", "xams/ack/rga/scan", action="start", recipe="quick")
+        analyser["device"].queue.clear()            # scans not ready yet
+        analyser["device"].scanning = True
+        service._last_activity -= 1000
+        service.read()
+        assert not [p for p in analyser["device"].sets if p.endswith("control/set?release")]
+
+    def test_a_stopping_service_stops_the_scan_and_releases(
+            self, monkeypatch, tmp_path, analyser):
+        service = running(monkeypatch, tmp_path, analyser)
+        command(service, "_handle_control", "xams/ack/rga/control", action="take")
+        service.read()
+        command(service, "_handle_scan", "xams/ack/rga/scan", action="start", recipe="quick")
+        device = analyser["device"]
+        service.close()
+        assert "/mmsp/scanSetup/set?scanStop=Immediately" in device.sets
+        assert device.sets[-1] == "/mmsp/communication/control/set?release"
+
+
+class TestRecipes:
+    def test_the_repository_recipes_are_valid(self):
+        recipes = rga_file.load_recipes(rga_file_path())
+        assert set(recipes) >= {"survey", "air_leak", "xenon", "quick"}
+        assert sum(rga_file.points(c) for c in recipes["quick"]["channels"]) == QUICK_POINTS
+
+    @pytest.mark.parametrize("channel, message", [
+        ({"mode": "sweep", "start": 1, "stop": 250, "ppamu": 10}, "outside"),
+        ({"mode": "sweep", "start": 10, "stop": 5, "ppamu": 10}, "stop must exceed"),
+        ({"mode": "single", "mass": 18, "dwell": 50000}, "dwell"),
+        ({"mode": "emission", "mass": 18}, "mode"),
+    ])
+    def test_a_bad_recipe_is_refused_not_clipped(self, channel, message):
+        with pytest.raises(rga_file.RecipeError, match=message):
+            rga_file.validate_recipe("bad", {"channels": [channel]})
+
+
+def rga_file_path():
+    from xams_sc.config import CONFIG_DIR
+    return CONFIG_DIR / "rga_recipes.yaml"
+
+
+class TestThePageWithControl:
+    def test_it_offers_release_and_start_when_it_holds_the_analyser(self, webui):
+        client, app, bus = webui
+        bus.deliver(TOPIC_RGA_INFO, json.dumps({
+            "identity": {"name": "RGA PrismaPro A 200 47504651"},
+            "control": {"controlled": True, "us": True, "client": "xams-sc"},
+            "recipes": {"quick": {"description": "", "scans": 2, "seconds": 6.3}},
+            "acquisition": {"recipe": "quick", "state": "done", "done": 2, "of": 2,
+                            "t_start": "2026-10-13T14:00:00Z", "by": "t", "saved": None}}))
+        deliver(bus, "rga_control", 1.0, "code")
         body = client.get("/rga").text
-        assert 'action="/rga' not in body and 'method="post"' not in body.split("<main")[-1]
+        assert 'value="release"' in body and 'value="start"' in body
+        assert 'action="/rga/save"' in body
+
+    def test_the_live_scan_is_served_as_json(self, webui):
+        client, app, bus = webui
+        bus.deliver("xams/rga/scan", json.dumps({"masses": [1, 2], "values": [1e-14, 2e-14]}))
+        assert client.get("/api/rga/scan").json()["values"] == [1e-14, 2e-14]

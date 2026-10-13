@@ -25,6 +25,7 @@ from ..model import ServiceState, utcnow
 from ..service import SingleInstance, setup_logging
 from .alarm_writer import AlarmWriter
 from .audit_writer import AuditWriter
+from .rga_writer import RgaSummaryWriter
 from .flow_writer import FlowPeriodWriter
 from .jsonl_writer import JsonlWriter
 from .pg_writer import PgWriter
@@ -325,6 +326,11 @@ def main(argv=None) -> int:
         audit_writer = AuditWriter(bus, dsn)
         audit_writer.start()
         log.info("audit writer started")
+        # The summary of each RGA Save (docs/drivers/rga.md). The spectra are
+        # files; this is the index Grafana reads.
+        rga_writer = RgaSummaryWriter(bus, dsn)
+        rga_writer.start()
+        log.info("RGA summary writer started")
     else:
         # Not an error. Milestone 1 is expected to run before the database
         # exists, and the archive is what matters.

@@ -22,7 +22,9 @@ Source: [the design specification](../DESIGN.md) §3 and `src/xams_sc/bus.py`.
 | `xams/audit` | one record per write, JSON | no |
 | `xams/flow/period` | the closed flow period, JSON | no |
 | `xams/backup/status` | the nightly backup's last result | **yes** |
-| `xams/rga/info` | the RGA's identity and controlling client, JSON; for the RGA page, never archived ([RGA](../drivers/rga.md)) | **yes** |
+| `xams/rga/info` | the RGA's identity, controlling client and acquisition, JSON; for the RGA page, never archived ([RGA](../drivers/rga.md)) | **yes** |
+| `xams/rga/scan` | the latest scan of a running RGA acquisition, JSON; for the live plot, never archived | **yes** |
+| `xams/rga/saved` | the summary of one RGA Save, for `rga_summary` | no |
 
 `<channel>` is a name from [`channels.yaml`](config.md). `<service>` is a
 service name — `cdaq`, `caen`, `lakeshore`, `ups`, `turbo`, `derived`, `sinks`,
@@ -122,7 +124,7 @@ worse than a gap (§1, principle 4).
 ## Commands and acknowledgements
 
 Every topic that makes an instrument *do* something has an acknowledgement
-beside it. There are six, and the list is short on purpose (§10, §10a).
+beside it. There are nine, and the list is short on purpose (§10, §10a).
 
 | Command | Acknowledgement | What it does |
 |---|---|---|
@@ -132,6 +134,9 @@ beside it. There are six, and the list is short on purpose (§10, §10a).
 | `xams/cmd/caen/output` | `xams/ack/caen/output` | energise or de-energise one HV channel |
 | `xams/cmd/derived/flow_reset` | `xams/ack/derived/flow_reset` | close the flow period, open a new one |
 | `xams/cmd/all/reload` | `xams/ack/<service>/reload` | re-read the YAML |
+| `xams/cmd/rga/control` | `xams/ack/rga/control` | take or release the RGA (`force` only when an operator chose it) |
+| `xams/cmd/rga/scan` | `xams/ack/rga/scan` | start a recipe, or stop the scan |
+| `xams/cmd/rga/save` | `xams/ack/rga/save` | write the last acquisition to its file |
 
 **The rules that apply to all of them:**
 

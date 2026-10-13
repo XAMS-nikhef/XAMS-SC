@@ -18,7 +18,8 @@ import time
 from dataclasses import dataclass
 
 from ..bus import (ACK_HV_CLEAR, ACK_HV_OUTPUT, ACK_HV_VSET, ACK_LS_RANGE, ACK_LS_SETPOINT,
-                   ACK_NOTIFY, TOPIC_ALARM, TOPIC_BACKUP, TOPIC_FLOW_RESET,
+                   ACK_NOTIFY, ACK_RGA_CONTROL, ACK_RGA_SAVE, ACK_RGA_SCAN,
+                   TOPIC_RGA_SCANDATA, TOPIC_ALARM, TOPIC_BACKUP, TOPIC_FLOW_RESET,
                    TOPIC_HV_TRIP, TOPIC_MEAS, TOPIC_RELOAD, TOPIC_RGA_INFO,
                    TOPIC_STATUS,
                    AckInbox, Bus)
@@ -94,6 +95,8 @@ class SystemState:
         self._backup: dict | None = None
         # The RGA's identity and controlling client, retained by its service.
         self._rga_info: dict | None = None
+        # The latest scan of the running acquisition, for the live plot.
+        self._rga_scan: str | None = None
         self._limits: dict | None = None
         self._notify: dict | None = None
         # Latched HV trips, by hv_vset channel, from the CAEN service's
@@ -303,6 +306,15 @@ class SystemState:
         except ValueError:
             pass
 
+    def _on_rga_scan(self, topic: str, payload: str) -> None:
+        with self._lock:
+            self._rga_scan = payload or None
+
+    def rga_scan(self) -> str | None:
+        """The latest scan, as the JSON text the service published."""
+        with self._lock:
+            return self._rga_scan
+
     def rga_info(self) -> dict:
         """What the RGA is and who controls it, as its service last said."""
         with self._lock:
@@ -353,6 +365,7 @@ class SystemState:
     def start(self) -> None:
         self.bus.subscribe(TOPIC_BACKUP, self._on_backup)
         self.bus.subscribe(TOPIC_RGA_INFO, self._on_rga_info)
+        self.bus.subscribe(TOPIC_RGA_SCANDATA, self._on_rga_scan)
         self.bus.subscribe("xams/ack/derived/flow_reset", self._on_flow_ack)
         # EVERY ack topic a command may use. `command()` waits for the reply
         # on one of these, so an unsubscribed topic makes every write time out
@@ -365,6 +378,9 @@ class SystemState:
         self.bus.subscribe(ACK_HV_OUTPUT, self._on_ack)
         self.bus.subscribe(ACK_HV_CLEAR, self._on_ack)
         self.bus.subscribe(ACK_NOTIFY, self._on_ack)
+        self.bus.subscribe(ACK_RGA_CONTROL, self._on_ack)
+        self.bus.subscribe(ACK_RGA_SCAN, self._on_ack)
+        self.bus.subscribe(ACK_RGA_SAVE, self._on_ack)
         self.bus.subscribe(f"{TOPIC_MEAS}/#", self._on_measurement)
         self.bus.subscribe(f"{TOPIC_STATUS}/#", self._on_status)
         self.bus.subscribe(f"{TOPIC_ALARM}/#", self._on_alarm)

@@ -1,9 +1,9 @@
-# Residual gas analyser (PrismaPro) — planned
+# Residual gas analyser (PrismaPro)
 
-!!! warning "Partly built: status only"
+!!! warning "Partly built: no emission control"
     This page is the implementation plan and the record of what is built.
-    Step 0 (read-only discovery) and step 1 (status service and page) are
-    done, 13 October 2026. Nothing writes to the analyser yet. See
+    Steps 0-2 are done (13 October 2026): status, control, scans and Save.
+    Step 2 is not yet deployed. Nothing here can switch emission. See
     [Steps](#steps).
 
 Pfeiffer PrismaPro QMG 250 on the pre-volume, on the lab Ethernet. Used
@@ -113,6 +113,73 @@ seven channels read.
 `.\tools\install_services.ps1 -Only rga` **in the same session**. Once the
 configuration has the `rga_*` channels, the badge says "CHANNEL(S) NOT OK" and
 System health "SERVICE NOT REPORTING" until the service runs.
+
+---
+
+## What is built (step 2, 13 October 2026)
+
+**Control, scans and Save**, from the RGA page. Still no emission: the
+client's whitelist (`prismapro.WRITABLE`) holds `communication/clientName`,
+`control`, `controlLock`, `scanSetup` and `scanSetup/channels/<n>`, with a
+fixed list of fields for the last two, and `MMSPControl._set` refuses
+anything else before a byte is sent.
+
+Found in a live test with control taken and emission off (13 October 2026):
+writes answer `"name": "wasSet"`; a sweep channel reports
+`reportUnits: "Current"`, so **scan values are ion currents in A** (noise
+about ±1.6 × 10⁻¹⁴ A with emission off); `systemStatus` bit 1 is set while a
+scan runs; `nextScan` hands over each scan once. 1–50 amu at 4/amu gave 197
+points per scan, 2 scans in 15 s.
+
+**Control.** *Take control* refuses if another client holds the analyser
+unless "take it anyway" is ticked (with a confirmation); *Release* gives it
+back and stops a running scan. The service releases by itself after
+`release_idle_s` (300 s) without a scan or a command, and on shutdown.
+
+**Recipes** in `config/rga_recipes.yaml`: `survey` (1–200 amu, 10/amu,
+16 ms, 3 scans of ~32 s), `air_leak` (2, 4, 14, 18, 28, 32, 40, 44 at 256 ms,
+10 scans of ~2 s), `xenon` (124–136 amu, 5 scans of ~4 s), `quick` (the
+tested 1–50 amu set-up, 2 scans of ~6 s). Validated at startup
+(`rga_file.validate_recipe`): out-of-bounds is refused, never clipped.
+
+**Acquisition.** *Start* loads the recipe into the analyser's channels 1..n
+and starts `scans` scans; while it runs the service reads every second and
+drains `nextScan`. A scan whose length differs from the recipe's is not
+recorded (the acquisition fails, saying why). The latest scan and the running
+mean go on retained `xams/rga/scan` for the live plot (canvas on the page,
+log or linear, polled every 2 s).
+
+**Save** writes the finished (or stopped) acquisition to
+`data/rga/YYYY/<start>_<recipe>.json` (format `xams-rga/1`, see
+`rga_file.py`): all scans and their mean in A, the recipe, the analyser's
+identity and settings at Save (emission current and state, electron energy,
+EM state, sensitivity, units, total pressure), the latest values of
+`snapshot_channels` (`p105`, `pmain`), comment, tags, background file and
+operator. One acquisition is saved once; a file is never overwritten.
+`load_rga(path)` reads it back with the mass axis and numpy arrays.
+
+**Summary** → `rga_saves` (one row per Save) and `rga_summary` (one row per
+summary mass: the largest mean current within ±0.5 amu, and a partial
+pressure in mbar from the device's own sensitivity and unit). Summary masses
+in `devices.yaml` `rga.summary_masses` (2, 4, 18, 28, 32, 40, 44, 129, 132).
+Written by `sinks/rga_writer.py` from `xams/rga/saved`; rebuilt from the
+files with `python tools/rga_rebuild_summary.py`. Tables in `sql/schema.sql`.
+Local PostgreSQL only for now; the Grafana dashboard (step 4) decides whether
+they also go to the Nikhef VM.
+
+**The page keeps its own writes.** Every other instrument write is on the
+Control page; the RGA's are on `/rga`, beside the spectrum they act on (one
+workflow: take, scan, look, save, give back). Control links to it; tests pin
+both.
+
+**Checked end-to-end on the analyser** (13 October 2026, from a test machine
+through the slow-control PC, emission off): take → `quick` → 2 scans in
+14.5 s → Save (12.6 kB file) → release; nobody in control afterwards.
+Full test suite 1029 passed.
+
+**Deploying it** (needs an OK): pull on the slow-control PC, apply
+`sql/schema.sql` (new tables), restart `XAMS-sinks`, `XAMS-rga` and
+`XAMS-webui`.
 
 ---
 
@@ -244,18 +311,20 @@ the HTTP equivalent of `*IDN?`.
 ## Steps
 
 0. **Discovery, read-only** — done 13 October 2026 (this page).
-1. **Client and status** — built 13 October 2026, not yet deployed (see
+1. **Client and status** — built and deployed 13 October 2026 (see
    [What is built](#what-is-built-step-1-13-october-2026)).
-2. **Scans with emission off:** take and release control, recipes, live
-   spectrum, Save → JSON and `rga_summary`, the rebuild tool. The whole data
-   path without risk to the filament.
+2. **Control, scans, Save** — built 13 October 2026, not yet deployed (see
+   [What is built](#what-is-built-step-2-13-october-2026)).
 3. **Emission:** button with confirmation, pre-checks, watchdog, audit. First
    real test together in the lab.
 4. **Grafana:** its own dashboard on `rga_summary`; a file browser on the page.
-5. **p105 interlock:** `p105` (cDAQ `9207/ai7`, mbar) is already a channel,
-   so this follows step 3 directly.
+5. **p105 guard:** `p105` (cDAQ `9207/ai7`, mbar) is already a channel,
+   so this follows step 3 directly. A software guard, not an interlock in
+   the sense of DESIGN.md §10 rule 1: the analyser's own over-pressure trip
+   is the protection; this only refuses emission and switches it off early.
 6. **Later:** trend mode; analysis helpers.
 
-**Open:** Torr or mbar (proposal: convert to mbar in the service and leave the
-device setting alone, since changing it is a write that PV MassSpec also sees); the summary masses (proposal: 2, 4,
-18, 28, 32, 40, 44, 129, 132).
+**Decided in step 2:** values stored as the device gives them (A); pressures in
+mbar converted in the service, the device left in Torr; summary masses 2, 4,
+18, 28, 32, 40, 44, 129, 132 (`devices.yaml`, changeable, history rebuilt from
+the files).
