@@ -92,11 +92,14 @@ class TestTaskBuilding:
         This asserts an exact count on purpose. A channel silently appearing
         or disappearing is worth a failing test: it means either the wiring
         or channels.yaml changed, and both deserve a look.
+        On 13 October 2026 the PKR gauge signal was wired to ai7 (p105_v),
+        the flow meter having moved to ai6. p105 itself is derived from it
+        and is not a task line.
         """
         total = sum(len(m.channels) for m in service._modules)
-        assert total == 15
+        assert total == 16
         kinds = [c.kind for m in service._modules for c in m.channels]
-        assert kinds.count("voltage") == 6
+        assert kinds.count("voltage") == 7
         assert kinds.count("current") == 2
         assert kinds.count("rtd") == 7
 
@@ -125,7 +128,7 @@ class TestTaskBuilding:
         physical order — the read comes back as one list and is zipped against
         that order, so a mixed task must stay sorted by index."""
         mod = next(m for m in service._modules if m.alias == "9207")
-        assert [c.kind for c in mod.channels] == ["voltage"] * 6 + ["current"] * 2
+        assert [c.kind for c in mod.channels] == ["voltage"] * 7 + ["current"] * 2
 
 
 class TestOpenCircuitDetection:
@@ -206,7 +209,8 @@ class TestBrokenLoopDetection:
 class TestSimulation:
     def test_simulate_produces_every_enabled_channel(self, service):
         batch = service.read()
-        expected = {c.name for m in service._modules for c in m.channels}
+        expected = ({c.name for m in service._modules for c in m.channels}
+                    | {c.name for c in service._derived})
         assert {m.channel for m in batch} == expected
 
     def test_simulate_needs_no_hardware(self, service):
@@ -250,3 +254,45 @@ class TestScalingThroughTheDriver:
         for name in ("tt201", "tt301", "ttamb"):
             ch = config.channels[name]
             assert ch.offset == 0.0 and ch.multiplier == 1.0
+
+
+class TestThePkrGauge:
+    """P105: the PKR signal on ai7, floating, and the pressure derived from it."""
+
+    def test_flow_meter_moved_to_ai6_and_gauge_is_on_ai7(self, config):
+        assert config.channels["fm101"].phys == "9207/ai6"
+        assert config.channels["p105_v"].phys == "9207/ai7"
+        assert "v6" not in config.channels
+
+    def test_the_pressure_is_not_a_task_line(self, service):
+        """Derived from p105_v; reading ai7 twice would be two names for one terminal."""
+        names = {c.name for m in service._modules for c in m.channels}
+        assert "p105_v" in names and "p105" not in names
+        assert [c.name for c in service._derived] == ["p105"]
+
+    def test_the_pressure_follows_the_signal(self, service):
+        from xams_sc.model import Measurement, utcnow
+        now = utcnow()
+        out = service._derive_from([Measurement(t=now, channel="p105_v", value=8.6,
+                                                unit="V")], now)
+        assert out[0].channel == "p105"
+        assert out[0].value == pytest.approx(1000, rel=0.05)
+        assert out[0].quality is Quality.OK
+
+    @pytest.mark.parametrize("volts", [0.0, 0.3, 9.8])
+    def test_a_dead_gauge_is_not_a_good_vacuum(self, service, volts):
+        """0 V would be 4.7e-12 mbar by the formula: an unpowered gauge must
+        not read as the best vacuum ever seen."""
+        from xams_sc.model import Measurement, utcnow
+        now = utcnow()
+        out = service._derive_from([Measurement(t=now, channel="p105_v", value=volts,
+                                                unit="V")], now)
+        assert out[0].value is None
+        assert out[0].quality is Quality.ERROR
+
+    def test_an_unreadable_signal_gives_an_unknown_pressure(self, service):
+        from xams_sc.model import Measurement, utcnow
+        now = utcnow()
+        out = service._derive_from([Measurement(t=now, channel="p105_v", value=None,
+                                                unit="V", quality=Quality.ERROR)], now)
+        assert out[0].value is None and out[0].quality is Quality.ERROR

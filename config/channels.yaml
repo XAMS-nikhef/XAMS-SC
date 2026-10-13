@@ -77,18 +77,13 @@ channels:
     description: detector pressure
     log_minmax: true
 
-  - name: v6
-    device: cdaq
-    phys: 9207/ai6
-    kind: voltage
-    unit: V
-    enabled: false
-    legacy: v6
-    description: not connected
-
+  # MOVED from ai7 to ai6 on 13 October 2026 (formerly the unconnected `v6`),
+  # so that ai7, the last terminal on the WAGO jumper chain that ties every
+  # AI- to COM, could be taken off that chain for the floating PKR signal
+  # below. Same name, same scaling: the history and fm101_total continue.
   - name: fm101
     device: cdaq
-    phys: 9207/ai7
+    phys: 9207/ai6
     kind: voltage
     offset: 0.0
     multiplier: 6.0
@@ -96,6 +91,41 @@ channels:
     legacy: FM101
     description: flow meter — mass flow in grams per minute
     log_minmax: true
+
+  # ------------------------------------------------------------------
+  # PKR full-range gauge on the HiCube 80 Eco (P105; "P_pirani" on the P&ID
+  # until it is relabelled). Its analog measuring signal is tapped from the
+  # gauge cable (PT 448 250-T: brown = pin 2 signal, green = pin 3 signal
+  # common) and read DIFFERENTIALLY on ai7, which is NOT on the AI-/COM jumper
+  # chain: the gauge is powered by the DCU, not from this side, and tying its
+  # signal common to COM would join two supply grounds (13 October 2026).
+  # Wiring guide: reference/HiPace80/PKR_gauge_analog_tap_guide.pdf in the
+  # maintainer's workspace.
+  #
+  # Two channels: the raw volts, kept so the measurement itself is archived,
+  # and the pressure computed from it (scaling.pkr_pressure, PKR 251 manual
+  # appendix A). Below 0.5 V or above 9.5 V the pressure is quality=error.
+  #
+  # on_pid false until the drawing carries the tag P105; then p105 gets its
+  # bubble from tools/build_mimic.py like P101-P104 and this becomes true.
+  # ------------------------------------------------------------------
+  - name: p105_v
+    device: cdaq
+    phys: 9207/ai7
+    kind: voltage
+    unit: V
+    on_pid: false
+    description: PKR gauge measuring signal (raw)
+
+  - name: p105
+    device: cdaq
+    phys: 9207/ai7
+    kind: voltage
+    unit: mbar
+    derive: {from: p105_v, transform: pkr_pressure}
+    on_pid: false
+    log_minmax: true
+    description: turbo / vacuum pressure, PKR full-range gauge
 
   # ------------------------------------------------------------------
   # NI 9207 current inputs ai8:15 — 4-20 mA loops.

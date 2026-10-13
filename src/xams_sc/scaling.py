@@ -103,6 +103,29 @@ def heater_power(percent: float, full_scale_v: float,
     return volts * volts / resistance_ohm
 
 
+def pkr_pressure(volts: float, u_min: float = 0.5, u_max: float = 9.5) -> float | None:
+    """Pfeiffer PKR 25x full-range gauge: measuring signal in volts to mbar.
+
+        p [mbar] = 10 ** (1.667 * U - 11.33)
+
+    PKR 251 operating instructions, appendix A; 0.6 V per decade, valid for
+    5e-9 < p < 1000 mbar, which is 1.82 V .. 8.6 V.
+
+    **Returns None for a signal that is not a measurement**, rather than a
+    pressure: below `u_min` (0.5 V) the gauge has no supply, above `u_max`
+    (9.5 V) its Pirani element is defective. The formula would happily turn
+    either into a number - 0 V is 4.7e-12 mbar, an excellent vacuum - and a
+    dead gauge would then read as the best vacuum the system has ever had.
+    A None from a transform is published as quality=error.
+
+    Between those limits and outside 1.82..8.6 V the gauge is under- or over-
+    range; the value is still the formula's, as on the DCU display.
+    """
+    if not (u_min <= volts <= u_max):
+        return None
+    return 10.0 ** (1.667 * volts - 11.33)
+
+
 # Named transforms available to channels.yaml via `derive.transform`.
 #
 # A NAME, never an expression. Putting an eval-able formula string in the
@@ -110,6 +133,7 @@ def heater_power(percent: float, full_scale_v: float,
 # people who should not have to think about what they are executing.
 TRANSFORMS = {
     "heater_power": heater_power,
+    "pkr_pressure": pkr_pressure,
 }
 
 

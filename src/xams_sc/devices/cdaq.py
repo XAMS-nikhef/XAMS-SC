@@ -111,6 +111,7 @@ class CdaqService(BaseService):
     def __init__(self, config: Config, bus, simulate: bool = False, **kw):
         super().__init__(config, bus, simulate=simulate, **kw)
         self._modules: list[ModuleTask] = []
+        self._derived: list[Channel] = []
         self._device_serials: dict[str, str] = {}
         # Log an out-of-range RTD once, not every second.
         self._reported_open: set[str] = set()
@@ -130,7 +131,15 @@ class CdaqService(BaseService):
                                 for m in cfg.get("modules", [])}
 
         by_alias: dict[str, list[Channel]] = {}
+        # Derived channels are computed from a read one (`derive` in
+        # channels.yaml) and never become a DAQmx task line: they share the
+        # physical input of their source, and adding it twice would read the
+        # same terminal into two names.
+        self._derived = [c for c in self.config.channels_for("cdaq")
+                         if c.derive is not None]
         for ch in self.config.channels_for("cdaq"):
+            if ch.derive is not None:
+                continue
             alias = ch.phys.split("/")[0]
             by_alias.setdefault(alias, []).append(ch)
 
@@ -337,6 +346,52 @@ class CdaqService(BaseService):
                           else None,
                     unit=ch.unit, raw=raw, quality=quality,
                 ))
+        out.extend(self._derive_from(out, now))
+        return out
+
+    def _derive_from(self, readings: list[Measurement], now) -> list[Measurement]:
+        """Compute the derived channels from the readings just taken.
+
+        Same timestamp as the source, and the source's quality: if the
+        voltage could not be read, the pressure is unknown, not zero. A
+        transform that returns None is saying the input is not a measurement
+        (a PKR signal below 0.5 V is a gauge without supply) and is published
+        as quality=error - logged once, not every second.
+        """
+        from ..scaling import TRANSFORMS
+
+        by_name = {m.channel: m for m in readings}
+        out = []
+        for ch in self._derived:
+            source = by_name.get(ch.derive["from"])
+            if source is None:
+                continue
+            if source.quality is not Quality.OK or source.value is None:
+                out.append(Measurement(t=now, channel=ch.name, value=None,
+                                       unit=ch.unit, quality=source.quality,
+                                       src=source.src))
+                continue
+            params = {k: v for k, v in ch.derive.items()
+                      if k not in ("from", "transform")}
+            try:
+                value = TRANSFORMS[ch.derive["transform"]](source.value, **params)
+            except Exception:
+                log.exception("could not derive %s from %s", ch.name, source.channel)
+                value = None
+            if value is None:
+                if ch.name not in self._reported_open:
+                    log.error("%s: %s = %.3f is not a valid input for %s; "
+                              "publishing quality=error", ch.name, source.channel,
+                              source.value, ch.derive["transform"])
+                    self._reported_open.add(ch.name)
+                out.append(Measurement(t=now, channel=ch.name, value=None,
+                                       unit=ch.unit, raw=source.value,
+                                       quality=Quality.ERROR, src=source.src))
+                continue
+            self._reported_open.discard(ch.name)
+            out.append(Measurement(t=now, channel=ch.name, value=value,
+                                   unit=ch.unit, raw=source.value,
+                                   quality=Quality.OK, src=source.src))
         return out
 
     def _read_simulated(self) -> list[Measurement]:
@@ -355,6 +410,10 @@ class CdaqService(BaseService):
                     # Mid-loop, about 10 kg — inside CURRENT_VALID_A, so the
                     # simulated channels are quality=ok like the rest.
                     raw = random.gauss(0.012, 0.0002)
+                elif any(d.derive.get("transform") == "pkr_pressure"
+                         and d.derive.get("from") == ch.name for d in self._derived):
+                    # A PKR signal at about 1e-6 mbar, inside its valid range.
+                    raw = random.gauss(3.2, 0.01)
                 else:
                     raw = random.gauss(1.5, 0.01)
                 out.append(Measurement(
@@ -362,4 +421,5 @@ class CdaqService(BaseService):
                     value=apply(raw, ch.offset, ch.multiplier),
                     unit=ch.unit, raw=raw, quality=Quality.OK, src="sim",
                 ))
+        out.extend(self._derive_from(out, now))
         return out
