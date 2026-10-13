@@ -139,6 +139,25 @@ def load_into_grafana(args) -> int:
         if missing:
             print(f"No archived dashboard with uid {sorted(missing)}.", file=sys.stderr)
             return 1
+    if args.missing:
+        # Only dashboards this Grafana does not have yet: a new one added to
+        # git reaches an installed Grafana, and none that exists - possibly
+        # edited in the UI - is touched. The VM installer runs this each time.
+        def present(uid):
+            req = urllib.request.Request(args.url + "/api/dashboards/uid/" + uid,
+                                         headers={"Authorization": auth})
+            try:
+                with urllib.request.urlopen(req, timeout=30):
+                    return True
+            except urllib.error.HTTPError as exc:
+                if exc.code == 404:
+                    return False
+                raise
+        files = [f for f in files
+                 if not present(json.loads(f.read_text(encoding="utf-8"))["uid"])]
+        if not files:
+            print("  every archived dashboard is already in Grafana")
+            return 0
     if not files:
         print(f"No dashboards in {DASHBOARD_DIR.relative_to(ROOT)}.")
         return 1
@@ -184,6 +203,8 @@ def main(argv=None) -> int:
                    help="report drift between Grafana and the files; write nothing")
     p.add_argument("--load", action="store_true",
                    help="push the archived files INTO Grafana (use on a fresh install)")
+    p.add_argument("--missing", action="store_true",
+                   help="with --load: only dashboards Grafana does not have yet")
     args = p.parse_args(argv)
 
     if args.load and (args.save or args.check):
@@ -191,6 +212,9 @@ def main(argv=None) -> int:
               file=sys.stderr)
         return 2
 
+    if args.missing and not args.load:
+        print("--missing goes with --load.", file=sys.stderr)
+        return 2
     if args.load:
         return load_into_grafana(args)
 

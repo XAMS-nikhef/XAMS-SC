@@ -523,7 +523,9 @@ the HTTP equivalent of `*IDN?`.
    [What is built](#what-is-built-step-4-13-october-2026)). Was step 5.
 5. **Grafana** — built 13 October 2026: dashboard **RGA** (`xams-rga`,
    [Grafana](../grafana/index.md#the-rga-dashboard)); `rga_saves.detector`
-   added so Faraday and EM Saves can be told apart.
+   added so Faraday and EM Saves can be told apart. Also on the Nikhef VM
+   (plotit-xams): the sinks send each summary there too, INSERT only;
+   `rga_rebuild_summary.py --remote` fills a gap.
 6. **Later:** trend mode; analysis helpers; EM gain calibration from here
    (now in PV MassSpec).
 

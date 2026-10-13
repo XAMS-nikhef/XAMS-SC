@@ -3,6 +3,7 @@
     python tools/rga_rebuild_summary.py            # all of data/rga/
     python tools/rga_rebuild_summary.py --dry-run  # say what would be stored
     python tools/rga_rebuild_summary.py --replace  # recompute rows already there
+    python tools/rga_rebuild_summary.py --remote   # the same into the Nikhef VM
 
 The files in `data/rga/` are the truth; `rga_saves` and `rga_summary` are an
 index over them (docs/drivers/rga.md, "Data"). This puts back what the
@@ -40,7 +41,15 @@ def main(argv=None) -> int:
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--replace", action="store_true",
                    help="delete and rewrite the summary rows of every file")
+    p.add_argument("--remote", action="store_true",
+                   help="write to the Nikhef VM (postgres_remote) instead; INSERT only")
     args = p.parse_args(argv)
+    if args.remote and args.replace:
+        # The VM's writer may only INSERT (docs/vm.md): rows there are never
+        # rewritten from the lab PC. Correcting them is an admin job on the VM.
+        print("--replace cannot be used with --remote: the VM's writer may only "
+              "INSERT", file=sys.stderr)
+        return 2
 
     masses = list(spec.get("summary_masses", SUMMARY_MASSES))
     found = rga_file.files(args.data_dir)
@@ -51,9 +60,10 @@ def main(argv=None) -> int:
     conn = None
     if not args.dry_run:
         import psycopg
-        dsn = dsn_from_secrets()
+        key = "postgres_remote" if args.remote else "postgres"
+        dsn = dsn_from_secrets(key)
         if not dsn:
-            print("no PostgreSQL DSN in config/secrets.yaml", file=sys.stderr)
+            print(f"no {key} block in config/secrets.yaml", file=sys.stderr)
             return 2
         conn = psycopg.connect(dsn, autocommit=True, connect_timeout=5)
 
@@ -71,7 +81,7 @@ def main(argv=None) -> int:
             if args.replace:
                 with conn.cursor() as cur:
                     cur.execute("DELETE FROM rga_summary WHERE file = %s", (summary["file"],))
-            store(conn, summary)
+            store(conn, summary, update=not args.remote)
     if conn is not None:
         conn.close()
     return 1 if bad else 0

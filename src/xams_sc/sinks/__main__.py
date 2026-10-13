@@ -347,6 +347,7 @@ def main(argv=None) -> int:
     remote = None
     remote_alarms = None
     remote_health = None
+    remote_rga = None
     remote_dsn = None if (args.no_postgres or args.no_remote) \
         else dsn_from_secrets("postgres_remote")
     if remote_dsn:
@@ -359,6 +360,10 @@ def main(argv=None) -> int:
         remote_alarms = AlarmWriter(bus, remote_dsn, label="nikhef-vm-alarms")
         remote_alarms.start()
         remote_health = RemoteHealth(remote)
+        # The RGA summaries too (not the spectra: those stay files on the lab
+        # PC). INSERT only, like the rest of the VM.
+        remote_rga = RgaSummaryWriter(bus, remote_dsn, label="nikhef-vm", update=False)
+        remote_rga.start()
         log.info("Nikhef VM writer started")
 
     bus.connect()
@@ -411,6 +416,8 @@ def main(argv=None) -> int:
             log.info("[nikhef-vm] %s", remote.stats)
         if remote_alarms:
             remote_alarms.close()
+        if remote_rga:
+            remote_rga.close()
         bus.publish_state("sinks", ServiceState.STOPPED)
         bus.disconnect()
         lock.release()

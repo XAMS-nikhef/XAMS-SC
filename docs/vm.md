@@ -82,8 +82,8 @@ sudo SERVER_NAME=plotit-xams.nikhef.nl LABPC_IP=192.16.192.82 \
 | | |
 |---|---|
 | PostgreSQL 18 | from the PGDG repository; TLS with a self-signed certificate that the lab PC pins; database `xams`, schema from `sql/schema.sql` |
-| Roles | `xams_admin` owns the schema · `xams_writer` may INSERT into `meas` and `alarm_events` and read only the key columns `(t, channel, src)` · `xams_reader` may SELECT |
-| Grafana | on `127.0.0.1:3000` only; datasource from `grafana/provisioning-vm/`; anonymous Viewer; dashboards loaded from `grafana/dashboards-archive/` **once**, on the first run |
+| Roles | `xams_admin` owns the schema · `xams_writer` may INSERT into `meas`, `alarm_events`, `rga_saves` and `rga_summary` and read only their key columns · `xams_reader` may SELECT |
+| Grafana | on `127.0.0.1:3000` only; datasource from `grafana/provisioning-vm/`; anonymous Viewer; dashboards loaded from `grafana/dashboards-archive/` on the first run, and on later runs only those **not yet there** (`save_dashboard.py --load --missing`) |
 | nginx | HTTPS in front of Grafana; port 80 redirects |
 | ufw | as in the table above |
 | Watchdog | the "lab PC silent" alert, only when `WATCHDOG_EMAIL` is set |
@@ -173,8 +173,12 @@ starting the sinks with `--no-remote`) switches it off again.
 4. **The history**, once: [replay the archive](operating/tasks.md#replaying-the-archive-into-a-database)
    into the VM, and `--data-dir data\imported` for the LabVIEW years.
 
-Only measurements and alarm transitions go to the VM. Flow-integrator periods
-and the audit trail stay on the lab PC.
+Only measurements, alarm transitions and the **RGA summaries** (`rga_saves`,
+`rga_summary`, since 13 October 2026) go to the VM. Flow-integrator periods,
+the audit trail and the RGA spectra (the files in `data/rga/`) stay on the lab
+PC. An RGA summary the VM missed — it was down at the Save — is sent again
+with `tools\rga_rebuild_summary.py --remote`; rows already there are left
+alone (the writer may only INSERT, so `--replace` is refused with `--remote`).
 
 ---
 
@@ -201,8 +205,9 @@ gap; the lab PC's does not.
 
 **The VM's Grafana owns its dashboards.** An edit saved in the UI goes into
 `/var/lib/grafana/grafana.db` on the VM and nowhere else — not into git, not to
-the lab PC. The installer loads the archive only on its first run, so rerunning
-it never undoes an edit.
+the lab PC. The installer loads the whole archive only on its first run; later
+runs load only dashboards the VM does not have yet (how the RGA dashboard got
+there), so rerunning it never undoes an edit.
 
 To log in: **Sign in**, top right, as `admin` with `GRAFANA_ADMIN_PW` from the
 credentials file. Better, make yourself a personal Admin or Editor account under

@@ -25,6 +25,12 @@ INSERT INTO rga_saves (t, file, recipe, tags, comment, total_pressure_mbar, dete
 VALUES (%s, %s, %s, %s, %s, %s, %s)
 ON CONFLICT (file) DO UPDATE SET detector = EXCLUDED.detector
 """
+# For the Nikhef VM, whose writer may only INSERT (docs/vm.md): an existing
+# row is left as it is there.
+INSERT_SAVE_KEEP = """
+INSERT INTO rga_saves (t, file, recipe, tags, comment, total_pressure_mbar, detector)
+VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT (file) DO NOTHING
+"""
 INSERT_PEAK = """
 INSERT INTO rga_summary (t, file, mass, current_a, pp_mbar)
 VALUES (%s, %s, %s, %s, %s) ON CONFLICT (file, mass) DO NOTHING
@@ -42,18 +48,27 @@ def rows(summary: dict):
     return save, peaks
 
 
-def store(conn, summary: dict) -> None:
+def store(conn, summary: dict, update: bool = True) -> None:
+    """Insert one summary. `update` False never changes an existing row: the
+    VM's writer has INSERT and nothing else."""
     save, peaks = rows(summary)
     with conn.cursor() as cur:
-        cur.execute(INSERT_SAVE, save)
+        cur.execute(INSERT_SAVE if update else INSERT_SAVE_KEEP, save)
         for p in peaks:
             cur.execute(INSERT_PEAK, p)
 
 
 class RgaSummaryWriter:
-    def __init__(self, bus: Bus, dsn: str):
+    """One per database: the local one, and the Nikhef VM's (label
+    "nikhef-vm", update False). No buffer - a Save is a few a day, and a
+    missed one is restored from the file by tools/rga_rebuild_summary.py
+    (--remote for the VM)."""
+
+    def __init__(self, bus: Bus, dsn: str, label: str = "local", update: bool = True):
         self.bus = bus
         self.dsn = dsn
+        self.label = label
+        self.update = update
         self._conn = None
         self._written = 0
 
@@ -73,12 +88,14 @@ class RgaSummaryWriter:
             log.warning("unusable RGA summary (%s): %r", exc, payload[:120])
             return
         try:
-            store(self._connect(), summary)
+            store(self._connect(), summary, update=self.update)
             self._written += 1
         except Exception as exc:
             # Not fatal: the file exists, and the rebuild tool restores this.
-            log.error("could not store the RGA summary of %s (%s); rebuild it "
-                      "with tools/rga_rebuild_summary.py", summary.get("file"), exc)
+            log.error("[%s] could not store the RGA summary of %s (%s); rebuild it "
+                      "with tools/rga_rebuild_summary.py%s", self.label,
+                      summary.get("file"), exc,
+                      "" if self.update else " --remote")
             try:
                 if self._conn is not None:
                     self._conn.close()
