@@ -25,7 +25,7 @@ Ten panels, seven of them time series:
 | Temperatures — detector | `tt2%` | °C |
 | Temperatures — gas system & ambient | `tt1%`, `tt3%`, `tt4%`, `ttamb` | °C |
 | Pressures | `pmain`, `p101`–`p104` | bar |
-| Vacuum — P105 (PKR) and turbo speed | `p105` (left, **log** axis), `turbo_speed` (right, dashed) | mbar, Hz |
+| Vacuum — P105 (PKR) and turbo speed | `p105` (left, **log** axis), `turbo_speed` (right, dashed) | mbar (always, as `1.5e-2`), Hz |
 | Flow (fm101) — mass flow | `fm101` | g/min |
 | High voltage — VMON (signed) | `hv_%_vmon` | V |
 | High voltage — IMON | `hv_%_imon` | µA |

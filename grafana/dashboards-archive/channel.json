@@ -99,19 +99,27 @@
             },
             "properties": [
               {
-                "id": "unit",
-                "value": "pressurembar"
-              },
-              {
                 "id": "custom.scaleDistribution",
                 "value": {
-                  "type": "log",
-                  "log": 10
+                  "log": 10,
+                  "type": "log"
                 }
+              },
+              {
+                "id": "unit",
+                "value": "sci"
               },
               {
                 "id": "decimals",
                 "value": 2
+              },
+              {
+                "id": "displayName",
+                "value": "p105 (mbar)"
+              },
+              {
+                "id": "custom.axisLabel",
+                "value": "mbar"
               }
             ]
           }
@@ -206,5 +214,5 @@
   "timezone": "",
   "title": "Channel",
   "uid": "xams-channel",
-  "version": 1
+  "id": null
 }

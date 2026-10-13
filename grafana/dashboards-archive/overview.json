@@ -421,14 +421,10 @@
             },
             "properties": [
               {
-                "id": "unit",
-                "value": "pressurembar"
-              },
-              {
                 "id": "custom.scaleDistribution",
                 "value": {
-                  "type": "log",
-                  "log": 10
+                  "log": 10,
+                  "type": "log"
                 }
               },
               {
@@ -436,8 +432,20 @@
                 "value": "left"
               },
               {
+                "id": "unit",
+                "value": "sci"
+              },
+              {
                 "id": "decimals",
                 "value": 2
+              },
+              {
+                "id": "displayName",
+                "value": "p105 (mbar)"
+              },
+              {
+                "id": "custom.axisLabel",
+                "value": "mbar"
               }
             ]
           },
@@ -466,11 +474,11 @@
               {
                 "id": "custom.lineStyle",
                 "value": {
-                  "fill": "dash",
                   "dash": [
                     10,
                     10
-                  ]
+                  ],
+                  "fill": "dash"
                 }
               }
             ]
