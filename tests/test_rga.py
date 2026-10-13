@@ -259,6 +259,10 @@ class FakeAnalyser(MMSPControl):
         self.sets: list[str] = []
         self.emission = False
         self.interlock = False
+        # Reads of setEmission that still give the old value after a write,
+        # as the device did on 13 October 2026.
+        self.emission_lag = 0
+        self._lagging = 0
 
     def status(self):
         word = 0x01103B90 | (2 if self.scanning else 0)
@@ -294,6 +298,7 @@ class FakeAnalyser(MMSPControl):
                 self.scanning = False
             elif target == "generalControl/setEmission":
                 self.emission = query == "On"
+                self._lagging = self.emission_lag
             return self._event(path, query, "wasSet")
         target = path[len("/mmsp/"):-len("/get")]
         if target == "communication/controlInfo":
@@ -308,6 +313,9 @@ class FakeAnalyser(MMSPControl):
         if target == "status/systemStatus":
             return self._event(path, self.status())
         if target == "generalControl/setEmission":
+            if self._lagging:
+                self._lagging -= 1
+                return self._event(path, "Off" if self.emission else "On")
             return self._event(path, "On" if self.emission else "Off")
         extra = {"sensorIonSource/emissionCurrent": 2000,
                  "sensorIonSource/electronEnergy": 70,
@@ -626,6 +634,23 @@ class TestEmissionOn:
         assert service.bus.last_json("xams/rga/info")["emission"]["on"]
         assert service.bus.last_json("xams/audit")["action"] == "rga_emission_on"
 
+    def test_a_lagging_read_back_is_waited_for(self, monkeypatch, tmp_path, analyser):
+        service = holding(monkeypatch, tmp_path, analyser)
+        analyser["device"].emission_lag = 2
+        ack = emission(service, "on")
+        assert ack["ok"] and "read-back" not in ack["detail"], ack
+        assert analyser["device"].emission
+
+    def test_a_read_back_that_never_agrees_is_not_called_refused(
+            self, monkeypatch, tmp_path, analyser):
+        service = holding(monkeypatch, tmp_path, analyser)
+        device = analyser["device"]
+        device.emission_lag = 10 ** 6
+        device.EMISSION_CONFIRM_S = 0.3
+        ack = emission(service, "on")
+        assert ack["ok"] and "read-back still says Off" in ack["detail"], ack
+        assert device.emission
+
     def test_not_without_control(self, monkeypatch, tmp_path, analyser):
         service = running(monkeypatch, tmp_path, analyser)
         p105(service, 1.9e-5)
@@ -799,7 +824,7 @@ class TestThePageLayout:
 
     def test_with_emission_on_the_button_switches_it_off(self, webui):
         body = self.page_with(webui, emission=1.0)
-        assert 'value="off"' in body and "Emission OFF" in body
+        assert 'value="off"' in body and "Switch emission off" in body
 
 
 # ============================================================ keeping data

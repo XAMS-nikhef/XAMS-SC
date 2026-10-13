@@ -28,11 +28,27 @@
   .rga-controls h3 { margin:1rem 0 .4rem 0; font-size:.95em; }
   .rga-controls h3:first-of-type { margin-top:.2rem; }
   .rga-controls form { margin:.3rem 0; }
-  .rga-controls input[type=text], .rga-controls select { width:100%; box-sizing:border-box; }
-  /* Buttons at their own width, not the panel's: a column of full-width bars
-     reads as one big button. */
+  /* Inputs and buttons look like the Control page's (.reset-form in
+     base.html), at their own width: a column of full-width bars reads as one
+     big button, and a recipe name does not need the panel's width. */
   .rga-controls .stack { display:flex; flex-direction:column; gap:.4rem; align-items:flex-start; }
-  .rga-controls .stack button { min-width:9rem; }
+  .rga-controls .line { display:flex; gap:.4rem; align-items:center; flex-wrap:wrap; }
+  .rga-controls input[type=text], .rga-controls select {
+    padding:.35rem .5rem; font:inherit; font-size:.85rem; color:var(--text);
+    background:var(--bg); border:1px solid var(--line); border-radius:3px; }
+  .rga-controls input[type=text] { width:100%; max-width:24rem; box-sizing:border-box; }
+  .rga-controls select { width:auto; max-width:16rem; }
+  .rga-controls input:focus, .rga-controls select:focus { outline:none; border-color:var(--dim); }
+  .rga-controls button {
+    padding:.35rem .9rem; font:inherit; font-size:.85rem; font-weight:600;
+    color:var(--text); background:var(--panel); border:1px solid var(--line);
+    border-radius:3px; cursor:pointer; }
+  .rga-controls button:hover:not(:disabled) { border-color:var(--warn); color:var(--warn); }
+  .rga-controls button:disabled { color:var(--dim); cursor:not-allowed; opacity:.6; }
+  .rga-controls button.on:hover:not(:disabled) { border-color:var(--bad); color:var(--bad); }
+  .rga-controls button.off:hover:not(:disabled) { border-color:var(--good); color:var(--good); }
+  .rga-controls label.dim { font-size:.85em; }
+  #spectrum { display:block; width:100%; height:380px; margin-top:.6rem; cursor:crosshair; }
   .rga-files td { vertical-align:top; }
 </style>
 
@@ -123,17 +139,21 @@
   </form>
   {% endif %}
 
+  {# The button names the action, a verb; the state stands beside it. A
+     button reading "Emission ON" was taken for the state. #}
   <h3>Emission</h3>
   {% if emission_on %}
-  <form method="post" action="/rga/emission" class="stack">
+  <form method="post" action="/rga/emission" class="line">
     <input type="hidden" name="action" value="off">
-    <button type="submit" {{ 'disabled' if not ours }}>Emission OFF</button>
+    <button type="submit" class="off" {{ 'disabled' if not ours }}>Switch emission off</button>
+    <span>now: <span class="bad">ON</span></span>
   </form>
   {% else %}
-  <form method="post" action="/rga/emission" class="stack"
-        onsubmit="return confirm('Switch the RGA emission ON? The filament must be under vacuum. {{ (guard.get('reason') or '')|replace("'", '') }}.');">
+  <form method="post" action="/rga/emission" class="line"
+        onsubmit="return confirm('Switch the RGA emission on? The filament must be under vacuum. {{ (guard.get('reason') or '')|replace("'", '') }}.');">
     <input type="hidden" name="action" value="on">
-    <button type="submit" {{ 'disabled' if not ours or not guard.get('ok') }}>Emission ON</button>
+    <button type="submit" class="on" {{ 'disabled' if not ours or not guard.get('ok') }}>Switch emission on</button>
+    <span>now: {% if em and em.healthy %}<span class="good">off</span>{% else %}<span class="dim">unknown</span>{% endif %}</span>
   </form>
   {% endif %}
   <div class="dim" style="font-size:.85em">
@@ -143,11 +163,11 @@
   <h3>Scan</h3>
   {% if info.recipe_error %}<p class="bad">{{ info.recipe_error }}</p>{% endif %}
   {% if not scanning %}
-  <form method="post" action="/rga/scan" class="stack">
+  <form method="post" action="/rga/scan" class="line">
     <input type="hidden" name="action" value="start">
     <select name="recipe" aria-label="recipe">
       {% for name, r in recipes.items() %}
-      <option value="{{ name }}">{{ name }} — {{ r.scans }} × ~{{ r.seconds }} s</option>
+      <option value="{{ name }}" title="{{ r.description }}">{{ name }} — {{ r.scans }} × ~{{ r.seconds }} s</option>
       {% endfor %}
     </select>
     <button type="submit" {{ 'disabled' if not ours or not recipes }}>Start</button>
@@ -189,10 +209,10 @@
   <div id="acq-status" class="dim">
     {% if acq %}{{ acq.recipe }}: {{ acq.state }}, {{ acq.done }} of {{ acq.of }} scans{% if acq.saved %}, saved as {{ acq.saved }}{% endif %}{% if acq.error %} — {{ acq.error }}{% endif %}{% else %}no acquisition yet{% endif %}
   </div>
-  <canvas id="spectrum" height="360" style="width:100%;margin-top:.6rem"
-          aria-label="live spectrum"></canvas>
+  <canvas id="spectrum" aria-label="live spectrum"></canvas>
   <div class="dim" style="display:flex;gap:1rem;font-size:.85em;flex-wrap:wrap">
     <label><input type="checkbox" id="logy" checked> log scale (|current|)</label>
+    <label><input type="checkbox" id="labels" checked> molecules</label>
     <span id="plot-note"></span>
   </div>
   <div class="note" style="margin-top:.8rem">
@@ -234,43 +254,203 @@
   const canvas = document.getElementById('spectrum');
   const note = document.getElementById('plot-note');
   const logy = document.getElementById('logy');
-  let last = null;
+  const labels = document.getElementById('labels');
+  let last = null, hover = null;
+
+  // Where to name a molecule, most telling first: a label is drawn only if
+  // it does not collide with one already placed. Doubly charged Xe sits at m/z 62-68.
+  const MOLECULES = [
+    [18, 'H2O'], [28, 'N2/CO'], [2, 'H2'], [44, 'CO2'], [32, 'O2'], [40, 'Ar'],
+    [4, 'He'], [132, 'Xe-132'], [129, 'Xe-129'], [131, 'Xe-131'], [134, 'Xe-134'],
+    [136, 'Xe-136'], [130, 'Xe-130'], [66, 'Xe++'], [14, 'N'], [16, 'O/CH4'],
+    [17, 'OH'], [15, 'CH3'], [12, 'C'], [20, 'Ar++'], [128, 'Xe-128'],
+    [126, 'Xe-126'], [124, 'Xe-124'], [1, 'H'], [22, 'CO2++'], [69, 'CF3'],
+  ];
 
   function css(name, fallback) {
     return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
   }
+  function niceStep(span, n) {
+    const raw = span / Math.max(n, 1), p = Math.pow(10, Math.floor(Math.log10(raw)));
+    for (const m of [1, 2, 5, 10]) if (m * p >= raw) return m * p;
+    return 10 * p;
+  }
+  // "10" with a raised exponent, right-aligned at x. Unicode superscripts
+  // come out tiny in a canvas font, so it is drawn by hand.
+  function power(ctx, e, x, y) {
+    ctx.save(); ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    ctx.font = '9px sans-serif'; const ew = ctx.measureText(String(e)).width;
+    ctx.fillText(String(e), x - ew, y - 1);
+    ctx.font = '11px sans-serif'; const bw = ctx.measureText('10').width;
+    ctx.fillText('10', x - ew - bw - 1, y + 4);
+    ctx.restore();
+  }
 
   function draw() {
+    const dpr = window.devicePixelRatio || 1;
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    canvas.width = w * dpr; canvas.height = h * dpr;
     const ctx = canvas.getContext('2d');
-    const w = canvas.width = canvas.clientWidth, h = canvas.height;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
+    const C = {text: css('--text', '#dfe4ec'), dim: css('--dim', '#8b95a6'),
+               line: css('--line', '#2a303b'), good: css('--good', '#3fb950'),
+               warn: css('--warn', '#d29922'), bg: css('--bg', '#12151a')};
+    ctx.font = '11px sans-serif';
     if (!last || !last.values || !last.masses) {
-      note.textContent = 'no scan yet';
+      ctx.fillStyle = C.dim; ctx.textAlign = 'center';
+      ctx.fillText('no scan yet', w / 2, h / 2);
+      note.textContent = '';
       return;
     }
     const xs = last.masses, log = logy.checked;
     const f = v => log ? Math.log10(Math.max(Math.abs(v), 1e-16)) : v;
-    const series = [last.mean || [], last.values];
-    const all = series.flat().map(f);
+    const mean = last.mean || [], latest = last.values;
+    const all = mean.concat(latest).map(f);
     let lo = Math.min(...all), hi = Math.max(...all);
+    if (log) { lo = Math.floor(lo); hi = Math.ceil(hi + 0.05) + (labels.checked ? 0.6 : 0); }
+    else {
+      const st = niceStep((hi - lo) || 1, 5);
+      lo = Math.floor(lo / st) * st; hi = Math.ceil(hi / st) * st;
+      if (labels.checked) hi += (hi - lo) * 0.12;
+    }
     if (hi === lo) { hi += 1; lo -= 1; }
-    const x0 = Math.min(...xs), x1 = Math.max(...xs);
-    const pad = 46, X = m => pad + (m - x0) / ((x1 - x0) || 1) * (w - pad - 10),
-          Y = v => h - 20 - (f(v) - lo) / (hi - lo) * (h - 30);
-    ctx.fillStyle = css('--dim', '#888');
-    ctx.font = '11px sans-serif';
-    ctx.fillText(log ? `1e${hi.toFixed(1)} A` : `${hi.toExponential(1)} A`, 2, 12);
-    ctx.fillText(log ? `1e${lo.toFixed(1)}` : lo.toExponential(1), 2, h - 22);
-    ctx.fillText(`${x0} amu`, pad, h - 4); ctx.fillText(`${x1} amu`, w - 60, h - 4);
-    const colours = [css('--dim', '#888'), css('--good', '#3fb950')];
-    series.forEach((s, k) => {
-      if (!s.length) return;
-      ctx.strokeStyle = colours[k]; ctx.beginPath();
-      s.forEach((v, i) => i ? ctx.lineTo(X(xs[i]), Y(v)) : ctx.moveTo(X(xs[i]), Y(v)));
+    let x0 = Math.min(...xs), x1 = Math.max(...xs);
+    // Single masses (air_leak) are drawn as bars, half an amu either side.
+    const discrete = xs.some((m, i) => i && m - xs[i - 1] > 1.01);
+    if (discrete || x1 === x0) { x0 -= 1; x1 += 1; }
+
+    const L = 64, R = 14, T = 12, B = 40;
+    const pw = w - L - R, ph = h - T - B;
+    const X = m => L + (m - x0) / (x1 - x0) * pw;
+    const Y = v => T + ph - (f(v) - lo) / (hi - lo) * ph;
+    const Yr = y => T + ph - (y - lo) / (hi - lo) * ph;
+
+    // Grid and ticks.
+    ctx.strokeStyle = C.line; ctx.fillStyle = C.dim; ctx.lineWidth = 1;
+    ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    if (log) {
+      const step = (hi - lo) > 8 ? 2 : 1;
+      for (let e = Math.ceil(lo); e <= Math.floor(hi); e += step) {
+        const y = Math.round(Yr(e)) + .5;
+        ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(L + pw, y); ctx.stroke();
+        power(ctx, e, L - 6, y);
+      }
+    } else {
+      const st = niceStep(hi - lo, 5);
+      for (let v = Math.ceil(lo / st) * st; v <= hi + st / 1e6; v += st) {
+        const y = Math.round(Yr(v)) + .5;
+        ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(L + pw, y); ctx.stroke();
+        ctx.fillText(Math.abs(v) < st / 1e6 ? '0' : v.toExponential(1), L - 6, y);
+      }
+    }
+    const xst = niceStep(x1 - x0, pw / 70);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    for (let m = Math.ceil(x0 / xst) * xst; m <= x1 + 1e-9; m += xst) {
+      const x = Math.round(X(m)) + .5;
+      ctx.beginPath(); ctx.moveTo(x, T); ctx.lineTo(x, T + ph); ctx.stroke();
+      ctx.fillText(+m.toFixed(1), x, T + ph + 5);
+    }
+    ctx.strokeStyle = C.dim;
+    ctx.strokeRect(L + .5, T + .5, pw, ph);
+    ctx.fillStyle = C.text;
+    ctx.fillText('m/z (amu)', L + pw / 2, T + ph + 21);
+    ctx.save(); ctx.translate(13, T + ph / 2); ctx.rotate(-Math.PI / 2);
+    ctx.textBaseline = 'middle';
+    ctx.fillText('ion current' + (log ? ' |I|' : '') + ' (A)', 0, 0); ctx.restore();
+
+    // Molecules: a faint line at the mass, its name at the top, as long as
+    // there is room for it.
+    ctx.save();
+    ctx.beginPath(); ctx.rect(L, T, pw, ph); ctx.clip();
+    if (labels.checked) {
+      const placed = [];
+      ctx.textBaseline = 'top'; ctx.textAlign = 'center';
+      for (const [m, name] of MOLECULES) {
+        if (m < x0 || m > x1) continue;
+        const tw = ctx.measureText(name).width + 6;
+        const x = Math.min(Math.max(X(m), L + tw / 2), L + pw - tw / 2);
+        let row = -1;
+        for (let r = 0; r < 2 && row < 0; r++)
+          if (!placed.some(p => p.r === r && Math.abs(p.x - x) < (p.w + tw) / 2)) row = r;
+        if (row < 0) continue;
+        placed.push({x, w: tw, r: row});
+        ctx.strokeStyle = C.warn; ctx.globalAlpha = .35; ctx.setLineDash([3, 3]);
+        ctx.beginPath(); ctx.moveTo(X(m), T + 16 + row * 13); ctx.lineTo(X(m), T + ph); ctx.stroke();
+        ctx.setLineDash([]); ctx.globalAlpha = 1; ctx.fillStyle = C.warn;
+        ctx.fillText(name, x, T + 3 + row * 13);
+      }
+    }
+
+    // The spectrum: the latest scan filled, the mean as a line over it.
+    const base = T + ph;
+    if (discrete) {
+      const bw = Math.max(3, Math.min(18, pw / (x1 - x0) * .5));
+      latest.forEach((v, i) => {
+        ctx.fillStyle = C.good; ctx.globalAlpha = .55;
+        ctx.fillRect(X(xs[i]) - bw / 2, Y(v), bw, base - Y(v));
+        ctx.globalAlpha = 1;
+        if (mean.length) { ctx.fillStyle = C.text; ctx.fillRect(X(xs[i]) - bw / 2 - 2, Y(mean[i]) - 1, bw + 4, 2); }
+      });
+    } else {
+      const grad = ctx.createLinearGradient(0, T, 0, base);
+      grad.addColorStop(0, C.good + '66'); grad.addColorStop(1, C.good + '08');
+      ctx.beginPath(); ctx.moveTo(X(xs[0]), base);
+      latest.forEach((v, i) => ctx.lineTo(X(xs[i]), Y(v)));
+      ctx.lineTo(X(xs[xs.length - 1]), base); ctx.closePath();
+      ctx.fillStyle = grad; ctx.fill();
+      ctx.strokeStyle = C.good; ctx.lineWidth = 1.2; ctx.beginPath();
+      latest.forEach((v, i) => i ? ctx.lineTo(X(xs[i]), Y(v)) : ctx.moveTo(X(xs[i]), Y(v)));
       ctx.stroke();
-    });
-    note.textContent = `${last.recipe}: scan ${last.done} of ${last.of} (green: latest, grey: mean), ${last.t}`;
+      if (mean.length && last.done > 1) {
+        ctx.strokeStyle = C.text; ctx.globalAlpha = .7; ctx.lineWidth = 1;
+        ctx.beginPath();
+        mean.forEach((v, i) => i ? ctx.lineTo(X(xs[i]), Y(v)) : ctx.moveTo(X(xs[i]), Y(v)));
+        ctx.stroke(); ctx.globalAlpha = 1;
+      }
+    }
+
+    // Read-out under the pointer.
+    if (hover !== null && hover >= L && hover <= L + pw) {
+      const m = x0 + (hover - L) / pw * (x1 - x0);
+      let k = 0;
+      xs.forEach((v, i) => { if (Math.abs(v - m) < Math.abs(xs[k] - m)) k = i; });
+      const x = X(xs[k]);
+      ctx.strokeStyle = C.dim; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(x, T); ctx.lineTo(x, base); ctx.stroke();
+      ctx.fillStyle = C.good; ctx.beginPath(); ctx.arc(x, Y(latest[k]), 3, 0, 2 * Math.PI); ctx.fill();
+      const txt = `${xs[k].toFixed(1)} amu: ${latest[k].toExponential(2)} A` +
+                  (mean.length && last.done > 1 ? ` (mean ${mean[k].toExponential(2)})` : '');
+      const tw = ctx.measureText(txt).width + 12;
+      const bx = Math.min(Math.max(x + 8, L + 2), L + pw - tw - 2), by = T + ph - 26;
+      ctx.fillStyle = C.bg; ctx.globalAlpha = .9; ctx.fillRect(bx, by, tw, 20);
+      ctx.globalAlpha = 1; ctx.strokeStyle = C.line; ctx.strokeRect(bx + .5, by + .5, tw, 20);
+      ctx.fillStyle = C.text; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      ctx.fillText(txt, bx + 6, by + 10);
+    }
+    ctx.restore();
+
+    // Legend.
+    ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.font = '11px sans-serif';
+    let lx = L + pw - 8;
+    const item = (colour, text) => {
+      ctx.fillStyle = C.text; ctx.fillText(text, lx, T + ph - 12);
+      lx -= ctx.measureText(text).width + 6;
+      ctx.fillStyle = colour; ctx.fillRect(lx - 14, T + ph - 13, 14, 2.5);
+      lx -= 28;
+    };
+    if (hover === null) {
+      if (mean.length && last.done > 1) item(C.text, `mean of ${last.done}`);
+      item(C.good, `scan ${last.done} of ${last.of}`);
+    }
+    note.textContent = `${last.recipe}, ${last.t.slice(0, 19).replace('T', ' ')} UTC`;
   }
+
+  canvas.addEventListener('mousemove', e => {
+    hover = e.clientX - canvas.getBoundingClientRect().left; draw();
+  });
+  canvas.addEventListener('mouseleave', () => { hover = null; draw(); });
+  labels.addEventListener('change', draw);
 
   async function poll() {
     try {

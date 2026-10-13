@@ -252,13 +252,25 @@ class MMSPControl(MMSPClient):
 
     # ------------------------------------------------------------ emission
 
+    # The read-back of setEmission lags the write: on 13 October 2026 a read
+    # straight after a "wasSet" still gave the old value, while the write had
+    # taken (the next read gave the new one). So the read-back is polled.
+    EMISSION_CONFIRM_S = 3.0
+
     def set_emission(self, on: bool) -> str:
         """Ask for emission On or Off; return what the device now says it was
-        asked for. The emission itself follows within seconds - its real
-        state is systemStatus bit 31/30 (`emission_on`), not this reply."""
+        asked for, polled for up to EMISSION_CONFIRM_S until it agrees. The
+        emission itself follows within seconds - its real state is
+        systemStatus bit 31/30 (`emission_on`), not this reply."""
+        want = "On" if on else "Off"
         with self.lock:
-            self._set("generalControl/setEmission", {"v": "On" if on else "Off"})
-            return str(self.get("generalControl/setEmission"))
+            self._set("generalControl/setEmission", {"v": want})
+            deadline = time.monotonic() + self.EMISSION_CONFIRM_S
+            while True:
+                asked = str(self.get("generalControl/setEmission"))
+                if asked == want or time.monotonic() >= deadline:
+                    return asked
+                time.sleep(0.25)
 
 
 # ------------------------------------------------------------------ decoding

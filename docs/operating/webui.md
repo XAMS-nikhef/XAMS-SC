@@ -521,13 +521,14 @@ on — and when it stops. PV MassSpec is never locked out by a page left open.
 
 ### Emission
 
-**Emission ON** asks for a confirmation and is refused — the button is
+**Switch emission on** asks for a confirmation and is refused — the button is
 greyed, with the reason under it — unless this system holds the analyser, p105
 is fresh (at most 30 s old) and below 5 × 10⁻⁴ mbar, the analyser reports no
 hardware errors and its emission interlock is clear. The filament must be
-under vacuum. The emission state follows within seconds.
+under vacuum. The emission state follows within seconds. The button says
+what it does; the state is next to it (*now: off*).
 
-**Emission OFF** needs only control. Emission also goes off **by itself**:
+**Switch emission off** needs only control. Emission also goes off **by itself**:
 
 - at once when p105 reaches 5 × 10⁻⁴ mbar;
 - when p105 stops arriving for more than 90 s;
@@ -548,12 +549,16 @@ Pick a recipe and press **Start**:
 |---|---|---|
 | `survey` | 1–200 amu, 10 points/amu | 3 scans of ~32 s |
 | `air_leak` | 2, 4, 14, 18, 28, 32, 40, 44 amu | 10 scans of ~2 s |
-| `xenon` | 124–136 amu (Xe⁺ isotopes) | 5 scans of ~4 s |
+| `xenon` | 120–136 amu (Xe⁺ isotopes from 124) | 5 scans of ~5 s |
 | `quick` | 1–50 amu, 4 points/amu | 2 scans of ~6 s |
 
 Recipes are in `config/rga_recipes.yaml`; a new one is a few lines there and a
 restart of `XAMS-rga`. The plot fills in as scans arrive: green the latest
-scan, grey the mean so far, log or linear, in ampere. **Stop** ends a scan
+scan, a light line the mean so far, log or linear, in ampere against m/z.
+Single-mass recipes (`air_leak`) are drawn as bars. Common molecules are named
+at their mass (H2O, N2/CO, O2, Ar, CO2, the Xe isotopes, Xe++ near 66) where
+there is room; *molecules* switches the names off. Point at the plot to read
+the mass and current there. **Stop** ends a scan
 early; what was taken can still be saved.
 
 ### Saving
