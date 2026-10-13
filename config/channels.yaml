@@ -106,8 +106,8 @@ channels:
   # and the pressure computed from it (scaling.pkr_pressure, PKR 251 manual
   # appendix A). Below 0.5 V or above 9.5 V the pressure is quality=error.
   #
-  # on_pid false until the drawing carries the tag P105; then p105 gets its
-  # bubble from tools/build_mimic.py like P101-P104 and this becomes true.
+  # On the P&ID in the gauge's bubble: tools/build_mimic.py relabels the
+  # drawing's "P_pirani" to P105 (RELABEL) until the drawing itself is changed.
   # ------------------------------------------------------------------
   - name: p105_v
     device: cdaq
@@ -123,7 +123,6 @@ channels:
     kind: voltage
     unit: mbar
     derive: {from: p105_v, transform: pkr_pressure}
-    on_pid: false
     log_minmax: true
     description: turbo / vacuum pressure, PKR full-range gauge
 

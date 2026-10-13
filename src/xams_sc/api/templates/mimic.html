@@ -280,7 +280,9 @@ async function refresh() {
       const m = Math.abs(c.value);
       // A slot may say how many decimals it wants (build_mimic.py DIGITS):
       // a stopped turbo is "0 Hz", not "0.00 Hz".
-      text = node.dataset.digits !== undefined
+      text = node.dataset.format === "exp"
+           ? c.value.toExponential(1)
+           : node.dataset.digits !== undefined
            ? c.value.toFixed(Number(node.dataset.digits))
            : (m >= 1000 ? c.value.toFixed(0)
             : m >= 10   ? c.value.toFixed(1)
