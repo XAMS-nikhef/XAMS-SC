@@ -54,10 +54,12 @@ ticked elsewhere. The spectrum has its own fetch, every two seconds.
 
 **A pressed button greys every control** on the RGA page and reads
 *working…* until the service has answered — a command takes seconds, and a
-button that stayed live invited a second click. While the analyser is still
-switching after that, the button says *Emission starting…* or *EM
-starting…* (the analyser's own "request pending" bits) and the page
-refreshes every two seconds until it has followed.
+button that stayed live invited a second click. After that, until the
+analyser **reports** the new state, the button says *Emission starting…* /
+*stopping…* or *EM starting…* / *stopping…* and cannot be pressed: the
+service remembers what it asked for and reads the analyser every second until
+it has followed (at most 30 s; past that the page says it did not follow).
+The page refreshes every two seconds meanwhile.
 
 Every other page except **Logs** reloads itself **every ten seconds**, so a
 screen left open is never showing yesterday.
