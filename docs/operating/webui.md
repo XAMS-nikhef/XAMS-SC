@@ -657,6 +657,18 @@ cannot come back after it. The page itself no longer reloads: it swaps in
 what changed every 10 s, every 2 s while anything moves, and keeps whatever
 was typed, loaded or chosen and not yet sent.
 
+### Lake Shore and integrated flow cards
+
+Each card puts its readings and controls to the left of a compact history
+plot. The cards sit side by side on wide screens; on narrower screens they
+stack, and on phones the plots move below the controls. Both plots offer
+**15 min, 1 h or 6 h**. Lake Shore shows sensor temperatures, output 1's
+setpoint and heater percentage; flow shows the rate and integrated mass.
+
+A successful flow reset or Lake Shore setting change returns to the controls
+without a green banner. Refusals and unacknowledged resets still show an error.
+The RGA controls remain accessible through the **RGA** navigation tab.
+
 ### The plots beside each supply (14 October 2026)
 
 Each supply has a plot of its four channels next to its table (below it when
