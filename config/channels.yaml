@@ -341,6 +341,14 @@ channels:
      legacy: "Gate", limits: {min: 0.0, max: 400.0}, description: "TPC gate"}
   - {name: hv_gate_imon, device: hv_2, phys: 3, kind: hv_imon, unit: uA,
      description: "TPC gate current"}
+  # hv_2 channel 1: NOT USED since the gate moved to channel 3 (14 October
+  # 2026), its output disconnected. Kept on the list so /hv shows the whole
+  # supply; still a NEGATIVE channel on the board. Its setpoint may only be
+  # 0 V (limits 0..0), so it cannot be energised to a voltage from here.
+  - {name: hv_spare_vmon, device: hv_2, phys: 1, kind: hv_vmon, unit: V, sign: -1,
+     limits: {min: -3750.0, max: 0.0}, description: "hv_2 ch 1 - not used (spare)", on_pid: false}
+  - {name: hv_spare_imon, device: hv_2, phys: 1, kind: hv_imon, unit: uA, on_pid: false,
+     description: "hv_2 ch 1 - not used (spare), current"}
   - {name: hv_anode_vmon, device: hv_2, phys: 2, kind: hv_vmon, unit: V, sign: 1,
      legacy: "Anode", limits: {min: 0.0, max: 4500.0}, description: "TPC anode"}
   - {name: hv_anode_imon, device: hv_2, phys: 2, kind: hv_imon, unit: uA,
@@ -384,6 +392,8 @@ channels:
      description: "TPC cathode status word"}
   - {name: hv_gate_stat, device: hv_2, phys: 3, kind: hv_stat, unit: bits,
      description: "TPC gate status word"}
+  - {name: hv_spare_stat, device: hv_2, phys: 1, kind: hv_stat, unit: bits, on_pid: false,
+     description: "hv_2 ch 1 - not used (spare), status word"}
   - {name: hv_anode_stat, device: hv_2, phys: 2, kind: hv_stat, unit: bits,
      description: "TPC anode status word"}
   - {name: hv_nai_stat, device: hv_2, phys: 3, kind: hv_stat, unit: bits, enabled: false,
@@ -431,6 +441,8 @@ channels:
      limits: {min: -3500.0, max: 0.0}, default_setpoint: -2250.0, description: "TPC cathode setpoint"}
   - {name: hv_gate_vset, device: hv_2, phys: 3, kind: hv_vset, unit: V, sign: 1,
      limits: {min: 0.0, max: 400.0}, default_setpoint: 303.0, description: "TPC gate setpoint"}
+  - {name: hv_spare_vset, device: hv_2, phys: 1, kind: hv_vset, unit: V, sign: -1, on_pid: false,
+     limits: {min: 0.0, max: 0.0}, description: "hv_2 ch 1 - not used (spare), setpoint"}
   - {name: hv_anode_vset, device: hv_2, phys: 2, kind: hv_vset, unit: V, sign: 1,
      limits: {min: 0.0, max: 4500.0}, default_setpoint: 4200.0, description: "TPC anode setpoint"}
   - {name: hv_nai_vset, device: hv_2, phys: 3, kind: hv_vset, unit: V, sign: 1, enabled: false,

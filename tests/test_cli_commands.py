@@ -206,7 +206,7 @@ class TestHvOutput:
         assert rc == 1
         assert "hv_anode_vset" in out
         assert "the front-panel switch is off" in out
-        assert "1 of 7 refused or unanswered" in out  # 8 until the NaI was disabled
+        assert "1 of 7 refused or unanswered" in out  # NaI disabled, spare skipped by "all on"
 
     def test_the_detail_is_shown_when_the_service_gives_one(self, cli, capsys):
         answers(cli, ACK_HV_OUTPUT, {

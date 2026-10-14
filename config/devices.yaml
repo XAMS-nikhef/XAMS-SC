@@ -66,18 +66,19 @@ caen:
     # AND GATE positive. The gate moved from channel 1 to channel 3, the NaI
     # detector's former (positive) channel, because the SiPM-neutral operating
     # point CM-B needs a positive gate (+303 V; see channels.yaml). Channel 1
-    # is disconnected and has no expectations. Channel 3 on the supply: +,
+    # is disconnected (shown as a spare, polarity checked). Channel 3 on the supply: +,
     # MAXV 500 (software limit +400), ISET 10 - it was MAXV 1000, ISET 150 for
     # the NaI. Ramp rates as on hv_1: up 25 V/s, down 50 V/s.
     # Read and alarmed on mismatch, never written (§8.3).
     expect:
       0: {pol: "-", maxv: 4000, rup: 25, rdw: 50,  trip: 10.0, iset: 10}
+      1: {pol: "-"}             # not used (spare); only its polarity is checked
       2: {pol: "+", maxv: 4500, rup: 25, rdw: 50,  trip: 10.0, iset: 10}
       3: {pol: "+", maxv: 500,  rup: 25, rdw: 50,  trip: 10.0, iset: 10}
-    # Plotted on /hv without its current (14 October 2026): the NaI base
-    # divider draws a steady current that nobody watches and that would set
-    # the scale of the electrode currents on a linear axis.
-    plot_without_imon: [3]
+    # Channels plotted on /hv without their current: none since 14 October
+    # 2026, when channel 3 went from the NaI (whose base divider current set
+    # the scale) to the gate, whose current matters.
+    plot_without_imon: []
 
 lakeshore:
   match: {vid: "1FB9", pid: "0300", serial: "335A12T"}

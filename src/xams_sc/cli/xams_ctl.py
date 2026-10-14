@@ -629,6 +629,15 @@ def _hv_output(args, on: bool) -> int:
     config = load()
     names = [args.channel] if args.channel else sorted(
         c.name for c in config.enabled_channels() if c.kind == "hv_vset")
+    # A channel whose setpoint may only be 0 V is a SPARE (hv_2 ch 1 since
+    # 14 October 2026: shown on /hv, output disconnected). Switching every
+    # channel on leaves it alone; naming it explicitly still works.
+    if on and not args.channel:
+        spares = [n for n in names
+                  if (config.channels[n].limits or {}) == {"min": 0.0, "max": 0.0}]
+        names = [n for n in names if n not in spares]
+        for n in spares:
+            print(f"  {n:22s} skipped (spare: setpoint limited to 0 V)")
     if not names:
         print("no hv_vset channels are configured")
         return 1
