@@ -58,17 +58,18 @@ caen:
     board_serial: "79"
     firmware: "1.04"
     baud: 9600
-    # cathode / (disconnected) / anode / gate since 14 October 2026 — only the
-    # anode positive. The gate moved from channel 1 to channel 3, the NaI
-    # detector's former channel; channel 1 is disconnected and has no
-    # expectations. Channel 3 must therefore be set on the supply to the GATE's
-    # values: NEGATIVE, MAXV 3750, ISET 10 - it was +, 1000 V, 150 uA for the
-    # NaI. Ramp rates as on hv_1: up 25 V/s, down 50 V/s.
+    # cathode / (disconnected) / anode / gate since 14 October 2026 — anode
+    # AND GATE positive. The gate moved from channel 1 to channel 3, the NaI
+    # detector's former (positive) channel, because the SiPM-neutral operating
+    # point CM-B needs a positive gate (+303 V; see channels.yaml). Channel 1
+    # is disconnected and has no expectations. Channel 3 on the supply: +,
+    # MAXV 500 (software limit +400), ISET 10 - it was MAXV 1000, ISET 150 for
+    # the NaI. Ramp rates as on hv_1: up 25 V/s, down 50 V/s.
     # Read and alarmed on mismatch, never written (§8.3).
     expect:
       0: {pol: "-", maxv: 4000, rup: 25, rdw: 50,  trip: 10.0, iset: 310}
       2: {pol: "+", maxv: 4500, rup: 25, rdw: 50,  trip: 10.0, iset: 10}
-      3: {pol: "-", maxv: 3750, rup: 25, rdw: 50,  trip: 10.0, iset: 10}
+      3: {pol: "+", maxv: 500,  rup: 25, rdw: 50,  trip: 10.0, iset: 10}
     # Plotted on /hv without its current (14 October 2026): the NaI base
     # divider draws a steady current that nobody watches and that would set
     # the scale of the electrode currents on a linear axis.

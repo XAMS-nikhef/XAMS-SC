@@ -329,10 +329,16 @@ channels:
   # detector's channel; the NaI is no longer powered from here and channel 1 is
   # disconnected). The names stay hv_gate_*: the history, the run snapshots on
   # the DAQ side and the analysis all address the gate by name, not by channel.
-  # Channel 3 was positive with MAXV 1000 V for the NaI - it must be NEGATIVE
-  # with MAXV >= 3750 V on the supply before the gate is driven from it.
-  - {name: hv_gate_vmon, device: hv_2, phys: 3, kind: hv_vmon, unit: V, sign: -1,
-     legacy: "Gate", limits: {min: -3750.0, max: 0.0}, description: "TPC gate"}
+  #
+  # AND THE GATE IS POSITIVE (CM-B, the SiPM-neutral operating point of the
+  # short-fill plan, 12 October 2026): the TPC is shifted so that the grounded
+  # SiPMs sit ~50 V below their surroundings - anode +2503, gate +303, cathode
+  # -215, bottom screen -65, top screen 0 V. A positive gate is why it is on
+  # the NaI's (positive) channel. Limit +400 V (the plan asks for >= +350 V).
+  # When the gate goes back to a negative supply (CM-A), sign, limits and the
+  # default below flip back, and devices.yaml with them.
+  - {name: hv_gate_vmon, device: hv_2, phys: 3, kind: hv_vmon, unit: V, sign: 1,
+     legacy: "Gate", limits: {min: 0.0, max: 400.0}, description: "TPC gate"}
   - {name: hv_gate_imon, device: hv_2, phys: 3, kind: hv_imon, unit: uA,
      description: "TPC gate current"}
   - {name: hv_anode_vmon, device: hv_2, phys: 2, kind: hv_vmon, unit: V, sign: 1,
@@ -423,8 +429,8 @@ channels:
      limits: {min: -2000.0, max: 0.0}, default_setpoint: -600.0, description: "bottom screen setpoint"}
   - {name: hv_cathode_vset, device: hv_2, phys: 0, kind: hv_vset, unit: V, sign: -1,
      limits: {min: -3500.0, max: 0.0}, default_setpoint: -2250.0, description: "TPC cathode setpoint"}
-  - {name: hv_gate_vset, device: hv_2, phys: 3, kind: hv_vset, unit: V, sign: -1,
-     limits: {min: -3750.0, max: 0.0}, default_setpoint: -1750.0, description: "TPC gate setpoint"}
+  - {name: hv_gate_vset, device: hv_2, phys: 3, kind: hv_vset, unit: V, sign: 1,
+     limits: {min: 0.0, max: 400.0}, default_setpoint: 303.0, description: "TPC gate setpoint"}
   - {name: hv_anode_vset, device: hv_2, phys: 2, kind: hv_vset, unit: V, sign: 1,
      limits: {min: 0.0, max: 4500.0}, default_setpoint: 4200.0, description: "TPC anode setpoint"}
   - {name: hv_nai_vset, device: hv_2, phys: 3, kind: hv_vset, unit: V, sign: 1, enabled: false,

@@ -53,7 +53,8 @@ class TestSimService:
         by_name = {m.channel: m.value for m in svc.read()}
 
         assert by_name["hv_cathode_vmon"] < 0
-        assert by_name["hv_gate_vmon"] < 0
+        # The gate is POSITIVE since 14 October 2026 (CM-B, SiPMs at ground).
+        assert by_name["hv_gate_vmon"] > 0
         assert by_name["hv_pmt_top_vmon"] < 0
         assert by_name["hv_anode_vmon"] > 0
         assert by_name["hv_anode_vmon"] > 0
