@@ -17,14 +17,22 @@
 .hv-btn.working { color:var(--warn); border-color:var(--warn); cursor:progress; }
 .control-pair { display:grid; gap:1.2rem; align-items:stretch;
                 grid-template-columns:repeat(2, minmax(0,1fr)); }
-@media (max-width:900px) { .control-pair { grid-template-columns:minmax(0,1fr); } }
+@media (max-width:1200px) { .control-pair { grid-template-columns:minmax(0,1fr); } }
 /* EQUAL HEIGHT, not each card to its own content. `align-items:start` let
    them end wherever their text ran out, so two boxes of different height sat
    side by side with a ragged edge between them. The grid stretches the
    wrapper; the wrapper is a flex row so the single card inside it fills that
    height rather than only the width. Content stays at the top of each. */
 .control-pair > div { display:flex; }
-.control-pair > div > .card { margin:0; flex:1; }
+.control-pair > div > .card { margin:0; flex:1; min-width:0; }
+/* Readings and controls on the left, a compact history plot on the right. */
+.control-split { display:grid; grid-template-columns:minmax(240px,1fr) minmax(0,1fr);
+                 align-items:start; }
+.control-readings { min-width:0; }
+.control-readings > .body { padding:.9rem; }
+.control-readings td { overflow-wrap:anywhere; }
+.control-readings .reset-form { flex-wrap:wrap; }
+@media (max-width:600px) { .control-split { grid-template-columns:minmax(0,1fr); } }
 /* THE PLOT BESIDE THE TABLE (14 October 2026): what each supply's channels
    did over the last minutes to hours, next to what they read now. Below the
    table when the window is too narrow to give both room. */
@@ -62,19 +70,11 @@ body[data-hv-window="21600"] .hv-plot button[data-window="21600"] {
    setpoint box on the page left open on a screen all day is the wrong thing
    to reach for by accident. #}
 
-{% if ls_ok %}<div class="flash good" style="margin:0 0 1rem 0">{{ ls_ok }}</div>{% endif %}
 {% if ls_error %}<div class="flash bad" style="margin:0 0 1rem 0">
   <strong>Refused — nothing was changed.</strong> {{ ls_error }}</div>{% endif %}
-{% if reset == 'ok' %}<div class="flash good" style="margin:0 0 1rem 0">
-  Flow period closed at {{ reset_total }} g. A new one is open.</div>{% endif %}
 {% if reset == 'failed' %}<div class="flash bad" style="margin:0 0 1rem 0">
   <strong>The derived service did not acknowledge.</strong> Nothing was reset.
   </div>{% endif %}
-
-{# The one exception to "every write is on this page": the RGA's control,
-   scans and Save are on /rga, beside the spectrum they act on. #}
-<p class="dim" style="margin:0 0 1rem 0">The residual gas analyser (control,
-  scans, Save) is on its own page: <a href="/rga">RGA</a>.</p>
 
 {# Side by side: two small cards, and stacking them pushed the high voltage
    below the fold on a laptop. They fold back to one column when the window
@@ -84,6 +84,8 @@ body[data-hv-window="21600"] .hv-plot button[data-window="21600"] {
 <div id="cryostat">
 <div class="card">
     <h2>Lake Shore 335 — temperature control</h2>
+    <div class="control-split">
+    <div class="control-readings">
     <table>
       {% for c in lakeshore.sensors %}
       <tr>
@@ -110,23 +112,8 @@ body[data-hv-window="21600"] .hv-plot button[data-window="21600"] {
       {% endfor %}
     </table>
 
-    {% if ls_ok %}<div class="flash good" style="margin:.9rem">{{ ls_ok }}</div>{% endif %}
     {% if ls_error %}<div class="flash bad" style="margin:.9rem">
       <strong>Refused — nothing was changed.</strong> {{ ls_error }}</div>{% endif %}
-
-    {# Drawn by the plot script from /api/plots/history (14 October 2026): the
-       two sensors and output 1's setpoint (dotted) in °C on the left, the
-       heater in % on the right (dashed). The same window buttons as the HV. #}
-    <div class="hv-plot" data-plot="lakeshore">
-    <div class="bar">
-      <span class="dim">last</span>
-      <button type="button" class="hv-btn" data-window="900">15 min</button>
-      <button type="button" class="hv-btn" data-window="3600">1 h</button>
-      <button type="button" class="hv-btn" data-window="21600">6 h</button>
-      <span class="legend dim" style="margin-left:auto"></span>
-    </div>
-    <canvas></canvas>
-    </div>
 
     <div class="body" style="border-top:1px solid var(--line)">
       {# The control path (§10), output 1 only.
@@ -156,12 +143,31 @@ body[data-hv-window="21600"] .hv-plot button[data-window="21600"] {
 
     </div>
 
+    </div>{# /control-readings #}
+    {# Drawn by the plot script from /api/plots/history (14 October 2026): the
+       two sensors and output 1's setpoint (dotted) in °C on the left, the
+       heater in % on the right (dashed). The same window buttons as the HV. #}
+    <div class="hv-plot" data-plot="lakeshore">
+    <div class="bar">
+      <span class="dim">last</span>
+      <button type="button" class="hv-btn" data-window="900">15 min</button>
+      <button type="button" class="hv-btn" data-window="3600">1 h</button>
+      <button type="button" class="hv-btn" data-window="21600">6 h</button>
+      <span class="legend dim" style="margin-left:auto"></span>
+    </div>
+    <canvas></canvas>
+    </div>
+
+    </div>{# /control-split #}
+
   </div>
 </div>
 
 <div id="flow">
 <div class="card">
     <h2>Integrated flow</h2>
+    <div class="control-split">
+    <div class="control-readings">
     <div class="body">
       {% set f = flow.view %}
       <div style="font-size:1.9rem;font-variant-numeric:tabular-nums;
@@ -190,10 +196,7 @@ body[data-hv-window="21600"] .hv-plot button[data-window="21600"] {
         {% endif %}
       </div>
 
-      {% if reset == 'ok' %}
-        <div class="flash good">Period closed at {{ reset_total }} g. A new
-          one is running; the old one is kept in <code>flow_periods</code>.</div>
-      {% elif reset == 'failed' %}
+      {% if reset == 'failed' %}
         <div class="flash bad">The derived service did not acknowledge.
           <strong>Nothing was reset.</strong> Is it running?</div>
       {% endif %}
@@ -206,6 +209,7 @@ body[data-hv-window="21600"] .hv-plot button[data-window="21600"] {
         <button type="submit">Reset</button>
       </form>
     </div>
+    </div>{# /control-readings #}
     {# The flow in g/min on the left, the running total in g on the right
        (dashed), from /api/plots/history (14 October 2026). #}
     <div class="hv-plot" data-plot="flow">
@@ -218,6 +222,7 @@ body[data-hv-window="21600"] .hv-plot button[data-window="21600"] {
     </div>
     <canvas></canvas>
     </div>
+    </div>{# /control-split #}
     <div class="note">
       Reset closes the period into <code>flow_periods</code> and opens a new
       one; nothing is erased (§7.5). Also
