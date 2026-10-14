@@ -60,6 +60,10 @@ caen:
       1: {pol: "-", maxv: 3750, rup: 50, rdw: 100, trip: 10.0, iset: 10}
       2: {pol: "+", maxv: 4500, rup: 50, rdw: 50,  trip: 10.0, iset: 10}
       3: {pol: "+", maxv: 1000, rup: 50, rdw: 50,  trip: 10.0, iset: 150}
+    # Plotted on /hv without its current (14 October 2026): the NaI base
+    # divider draws a steady current that nobody watches and that would set
+    # the scale of the electrode currents on a linear axis.
+    plot_without_imon: [3]
 
 lakeshore:
   match: {vid: "1FB9", pid: "0300", serial: "335A12T"}

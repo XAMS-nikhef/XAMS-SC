@@ -15,6 +15,7 @@ import json
 import logging
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass
 
 from ..bus import (ACK_HV_CLEAR, ACK_HV_OUTPUT, ACK_HV_VSET, ACK_LS_RANGE, ACK_LS_SETPOINT,
@@ -26,6 +27,20 @@ from ..bus import (ACK_HV_CLEAR, ACK_HV_OUTPUT, ACK_HV_VSET, ACK_LS_RANGE, ACK_L
 from ..model import Measurement, Quality, ServiceState, parse_iso, utcnow
 
 log = logging.getLogger(__name__)
+
+
+# The plots on the Control page (14 October 2026): how far back the web UI
+# keeps HV readings in memory, and which channels. Six hours of 10-s means is
+# ~2200 points per channel - nothing - and the page offers 15 min, 1 h and 6 h
+# with a Grafana link for anything longer. In memory, not from PostgreSQL
+# (§8.1): the page that shows the high voltage must work when the database
+# does not. Filled from the bus, and at start from the JSONL archive.
+HISTORY_S = 6 * 3600
+
+
+def keeps_history(channel: str) -> bool:
+    """The HV monitor and setpoint channels: what the Control page plots."""
+    return channel.startswith("hv_") and channel.endswith(("_vmon", "_imon", "_vset"))
 
 
 @dataclass
@@ -103,6 +118,8 @@ class SystemState:
         # retained records. Emptied by a clear.
         self._hv_trips: dict[str, dict] = {}
         self._hv_switching: dict[str, dict] = {}
+        # (epoch seconds, value) per channel, oldest first; see HISTORY_S.
+        self._history: dict[str, deque] = {}
         self.started = utcnow()
 
     # ---------------------------------------------------------------- inputs
@@ -116,6 +133,9 @@ class SystemState:
         with self._lock:
             self._measurements[m.channel] = m
             self._received_at[m.channel] = time.monotonic()
+            if (keeps_history(m.channel) and m.value is not None
+                    and m.quality == Quality.OK):
+                self._remember(m.channel, m.t.timestamp(), float(m.value))
             if m.channel == "fm101_total" and "gaps_s" in d:
                 self._flow_gaps = float(d["gaps_s"])
 
@@ -296,6 +316,44 @@ class SystemState:
                 return
             if isinstance(record, dict):
                 self._hv_switching[channel] = record
+
+    # ---------------------------------------------------------------- history
+
+    def _remember(self, channel: str, t: float, value: float) -> None:
+        """Append one reading; the caller holds the lock. Out-of-order points
+        (a seed racing the bus) are dropped rather than sorted in: a plot
+        line that doubles back is worse than a missing point."""
+        q = self._history.setdefault(channel, deque())
+        if q and t <= q[-1][0]:
+            return
+        q.append((t, value))
+        cutoff = t - HISTORY_S
+        while q and q[0][0] < cutoff:
+            q.popleft()
+
+    def seed_history(self, points: dict[str, list[tuple[float, float]]]) -> int:
+        """Put older readings (from the JSONL archive) IN FRONT of what the
+        bus has delivered since the start. Only points older than the first
+        live one are taken, so nothing is counted twice. Returns how many."""
+        added = 0
+        with self._lock:
+            for channel, pts in points.items():
+                q = self._history.setdefault(channel, deque())
+                first = q[0][0] if q else float("inf")
+                older = sorted(p for p in pts if p[0] < first)
+                cutoff = time.time() - HISTORY_S
+                older = [p for p in older if p[0] >= cutoff]
+                q.extendleft(reversed(older))
+                added += len(older)
+        return added
+
+    def history(self, channels, since_s: float) -> dict[str, list[list[float]]]:
+        """Readings of `channels` from the last `since_s` seconds, as
+        [[epoch, value], ...] - the shape the page's plot reads."""
+        cutoff = time.time() - since_s
+        with self._lock:
+            return {ch: [[t, v] for t, v in self._history.get(ch, ()) if t >= cutoff]
+                    for ch in channels}
 
     def hv_switching(self, channel: str) -> dict | None:
         """A channel turned off and not yet off (hv_vset name), or None."""

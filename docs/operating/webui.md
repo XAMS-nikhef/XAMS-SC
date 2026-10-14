@@ -657,6 +657,29 @@ cannot come back after it. The page itself no longer reloads: it swaps in
 what changed every 10 s, every 2 s while anything moves, and keeps whatever
 was typed, loaded or chosen and not yet sent.
 
+### The plots beside each supply (14 October 2026)
+
+Each supply has a plot of its four channels next to its table (below it when
+the window is narrower than about 1500 px): **VMON solid** on the left axis
+(V), **IMON dashed** on the right axis (µA), **VSET as a faint dotted line**,
+one colour per channel — the colour of the small bar in front of the channel's
+name in the table. Choose **15 min, 1 h or 6 h**; the choice is remembered in
+the browser. For anything longer use Grafana.
+
+- The values are the **10-s means** the CAEN service publishes, so a trip
+  spike of milliseconds does not show here; the trip banner says when a trip
+  happened and the peak IMON before it.
+- A gap of more than a minute (service down, channel not reading) breaks the
+  line instead of bridging it.
+- **NaI** (hv_2 ch 3) is plotted **without its current**: its base divider
+  current is steady, nobody watches it, and on a linear axis it would set the
+  scale for the electrode currents (`plot_without_imon` in `devices.yaml`).
+- The web UI keeps the last **6 hours in memory**, from the bus, and fills
+  them from the JSONL archive (`data/raw`) when it starts — never from the
+  database, so the plots work when PostgreSQL does not (§8.1). Right after a
+  restart the start of the window may be empty for a few seconds while the
+  archive is read.
+
 ## System health
 
 The question it answers is *is the software all right*, and it is built so that

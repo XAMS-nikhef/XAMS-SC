@@ -52,7 +52,7 @@ from ..bus import (ACK_RGA_CONTROL, ACK_RGA_EM, ACK_RGA_EMISSION, ACK_RGA_SAVE, 
                    ACK_LS_SETPOINT, ACK_NOTIFY, TOPIC_AUDIT, TOPIC_HV_CLEAR,
                    TOPIC_HV_OUTPUT, TOPIC_HV_VSET, TOPIC_LS_RANGE, TOPIC_LS_SETPOINT,
                    TOPIC_NOTIFY, TOPIC_RELOAD, Bus)
-from ..config import (ConfigError, load, read_hv_defaults,
+from ..config import (ROOT, ConfigError, load, read_hv_defaults,
                       read_recipients, recipient_warnings, recipients_path,
                       validate_recipients, write_hv_defaults,
                       write_recipients)
@@ -63,7 +63,8 @@ from .logview import (ROTATIONS, colourise, log_files, newest_first,
                       rotated)
 from .mimic import check_mimic_tags
 from .recipients_form import people_from_form, recipient_changes
-from .state import SystemState
+from .hv_history import seed_in_background
+from .state import HISTORY_S, SystemState
 
 log = logging.getLogger(__name__)
 
@@ -331,7 +332,8 @@ def _redirect_ls(error: str | None, ok: str | None = None):
 
 def create_app(broker: str = "127.0.0.1", port: int = 1883, *,
                http_host: str = "127.0.0.1",
-               http_port: int = 8000) -> FastAPI:
+               http_port: int = 8000,
+               history_dir: Path | None = None) -> FastAPI:
     """The application. `http_host`/`http_port` are where THIS server
     will be reached, which the cross-site check below needs to know: a
     UI started on another port must not lock itself out."""
@@ -343,6 +345,9 @@ def create_app(broker: str = "127.0.0.1", port: int = 1883, *,
     bus = Bus(client_id="webui", host=broker, port=port)
     state = SystemState(config, bus)
     state.start()
+    # The Control page's HV plots start with the last hours from the JSONL
+    # archive rather than empty (hv_history.py). `history_dir` only for tests.
+    seed_in_background(state, history_dir or ROOT / "data" / "raw")
 
     for problem in check_mimic_tags(config):
         log.warning("mimic drift: %s", problem)
@@ -916,6 +921,38 @@ def create_app(broker: str = "127.0.0.1", port: int = 1883, *,
         import json as _json
         text = state.rga_scan()
         return JSONResponse(_json.loads(text) if text else {})
+
+    @app.get("/api/hv/history")
+    def api_hv_history(window: int = 900):
+        """VMON, IMON and VSET of every HV channel over the last `window`
+        seconds, per supply, for the plots beside the tables on /hv
+        (14 October 2026). From the web UI's memory, never the database
+        (§8.1). A channel listed in its supply's `plot_without_imon`
+        (devices.yaml) is plotted without its current - the NaI divider
+        current is nobody's to watch and would set the scale."""
+        window = max(60, min(int(window), HISTORY_S))
+        supplies = []
+        for spec in state.config.devices.get("caen", []) or []:
+            no_imon = set(spec.get("plot_without_imon") or [])
+            rows = []
+            for ch in state.config.channels.values():
+                if ch.device != spec["id"] or ch.kind != "hv_vmon":
+                    continue
+                index = int(ch.phys)
+                rows.append((index, ch.name, index not in no_imon))
+            rows.sort()
+            names = [n.replace("_vmon", suffix) for _, n, _ in rows
+                     for suffix in ("_vmon", "_imon", "_vset")]
+            data = state.history(names, window)
+            supplies.append({"id": spec["id"], "channels": [{
+                "index": index,
+                "label": name.replace("hv_", "").replace("_vmon", ""),
+                "v": data[name],
+                "i": data[name.replace("_vmon", "_imon")] if with_i else None,
+                "vset": data[name.replace("_vmon", "_vset")],
+            } for index, name, with_i in rows]})
+        return JSONResponse({"now": datetime.now(timezone.utc).timestamp(),
+                             "window": window, "supplies": supplies})
 
     @app.get("/hv", response_class=HTMLResponse)
     def high_voltage(request: Request):
