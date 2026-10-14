@@ -79,6 +79,9 @@ body[data-hv-window="21600"] .hv-plot button[data-window="21600"] {
 {# Side by side: two small cards, and stacking them pushed the high voltage
    below the fold on a laptop. They fold back to one column when the window
    is too narrow to hold both without squeezing. #}
+{# Where a refusal from the Lake Shore or flow buttons is shown when the page
+   sent it in the background (no reload; see the script below). #}
+<div id="ctl-msg"></div>
 <div class="control-pair">
 
 <div id="cryostat">
@@ -673,44 +676,67 @@ document.addEventListener('submit', function (e) {
 (function () {
   var LIVE = ['cryostat', 'flow', 'setpoints', 'hv-forms'];
   var busy = false;
-  // THE SWITCH BUTTONS DO NOT RELOAD THE PAGE (14 October 2026). ON / OFF
-  // and clear-trip were plain form posts answered with a redirect, so the
-  // whole page was loaded again and the browser landed somewhere else on it.
-  // They are now sent in the background and the page is refreshed in place,
-  // like the 10-s refresh does: nothing moves. A refusal comes back as the
-  // redirect's hv_error and is shown in red above the tables. Without
-  // JavaScript the forms still post the old way.
-  function showMessage(text) {
-    var box = document.getElementById('hv-msg');
+  // NO BUTTON ON THIS PAGE RELOADS IT (14 October 2026). Every write was a
+  // plain form post answered with a redirect, so the whole page was loaded
+  // again and the browser landed somewhere else on it. They are now sent in
+  // the background and the page is refreshed in place, as the 10-s refresh
+  // does: nothing moves. A refusal comes back in the redirect (QUIET below)
+  // and is shown in red. Without JavaScript the forms still post the old way.
+  // Every button on this page that writes, by the action it posts to: which
+  // query parameter of the redirect carries a refusal, and where it is shown.
+  // Both message boxes sit outside the parts the refresh swaps.
+  var QUIET = {
+    '/hv/output':          {err: 'hv_error', box: 'hv-msg'},
+    '/hv/clear':           {err: 'hv_error', box: 'hv-msg'},
+    '/hv/apply':           {err: 'hv_error', box: 'hv-msg'},
+    '/lakeshore/setpoint': {err: 'ls_error', box: 'ctl-msg'},
+    '/lakeshore/range':    {err: 'ls_error', box: 'ctl-msg'},
+    '/flow/reset':         {err: 'reset', bad: 'failed', box: 'ctl-msg',
+                            text: 'the derived service did not acknowledge; nothing was reset.'}
+  };
+  function showMessage(boxId, text) {
+    var box = document.getElementById(boxId);
     if (!box) return;
     box.innerHTML = '';
     if (!text) return;
     var d = document.createElement('div');
     d.className = 'flash bad'; d.style.margin = '0 0 1rem 0';
     var b = document.createElement('strong');
-    b.textContent = 'Refused - nothing was changed for these. ';
+    b.textContent = 'Refused - nothing was changed. ';
     d.appendChild(b); d.appendChild(document.createTextNode(text));
     box.appendChild(d);
+  }
+  function refusal(spec, url) {
+    var v = new URL(url, location.href).searchParams.get(spec.err);
+    if (!v) return null;
+    if (spec.bad) return v === spec.bad ? spec.text : null;
+    return v;
   }
   document.addEventListener('submit', function (e) {
     if (e.defaultPrevented) return;              // cancelled at the confirm
     var form = e.target;
-    var quiet = form.id && (form.id.lastIndexOf('out-', 0) === 0
-                            || form.id.lastIndexOf('clr-', 0) === 0);
-    if (!quiet) { busy = true; return; }         // every other form: as before
+    var spec = QUIET[form.getAttribute('action')];
+    if (!spec) { busy = true; return; }          // anything else: as before
     e.preventDefault();
     busy = true;
+    var by = e.submitter;
+    if (by && !/^out-/.test(form.id)) by.disabled = true;
     fetch(form.getAttribute('action'), {
       method: 'POST', body: new URLSearchParams(new FormData(form)),
       cache: 'no-store', redirect: 'follow'
     }).then(function (r) {
-      showMessage(new URL(r.url, location.href).searchParams.get('hv_error'));
+      var why = refusal(spec, r.url);
+      showMessage(spec.box, why);
+      // Done: empty what was typed, as the reload used to. Refused: keep it,
+      // so it can be corrected rather than typed again.
+      if (!why) form.reset();
     }).catch(function () {
-      showMessage('the web UI did not answer - the command may not have been sent.');
+      showMessage(spec.box, 'the web UI did not answer - the command may not have been sent.');
     }).then(function () {
       busy = false;
+      if (by) by.disabled = false;
       // The clicked button has the focus, and a part holding the focus is not
-      // swapped - so let go of it, or it would stay "switching…".
+      // swapped - so let go of it, or it would keep showing "switching…".
       if (document.activeElement) document.activeElement.blur();
       return refresh(true);
     });
