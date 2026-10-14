@@ -931,6 +931,7 @@ def create_app(broker: str = "127.0.0.1", port: int = 1883, *,
                 imon_name = ch.name.replace("_vmon", "_imon")
                 expect = (spec.get("expect") or {}).get(index, {})
                 stat_view = state.channel(ch.name.replace("_vmon", "_stat"))
+                vmon_view = state.channel(ch.name)
                 vset_name = ch.name.replace("_vmon", "_vset")
                 vset_view = state.channel(vset_name)
                 default_channel = state.config.channels.get(vset_name)
@@ -1016,6 +1017,13 @@ def create_app(broker: str = "127.0.0.1", port: int = 1883, *,
                     # set through the ramp down and some seconds after).
                     "ramping": None if word is None else ramping(word),
                     "switching": state.hv_switching(vset_name),
+                    # Output off by STAT, volts still on it: the board clears
+                    # bit 0 before the output has come down (14 October 2026).
+                    "discharging": (word is not None and not is_energised(word)
+                                    and not is_disabled(word)
+                                    and vmon_view is not None and vmon_view.healthy
+                                    and vmon_view.value is not None
+                                    and abs(vmon_view.value) > 1.0),
                 })
             supplies.append({
                 "trips": [c for c in channels if c.get("trip")],
@@ -1030,7 +1038,7 @@ def create_app(broker: str = "127.0.0.1", port: int = 1883, *,
         # change something", which is the question asked before navigating.
         # They were on the overview only because they had nowhere else.
         q = request.query_params
-        moving = any(c["ramping"] or c["switching"]
+        moving = any(c["ramping"] or c["switching"] or c["discharging"]
                      for s in supplies for c in s["channels"])
         return page(request, "hv.html", supplies=supplies, moving=moving,
                     hv_ok=q.get("hv_ok"), hv_error=q.get("hv_error"),

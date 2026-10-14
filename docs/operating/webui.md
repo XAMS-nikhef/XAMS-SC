@@ -641,8 +641,13 @@ bit set through it and for some seconds after. Turning it **on** is "on" at
 once and ramps up after. The page now says where a channel is going:
 
 - **switching off…** from the accepted turn-off until the board reports the
-  output off (at most its ramp time at the configured rate plus 60 s), with
-  no button to press meanwhile;
+  output off **and** VMON is below 1 V (at most its ramp time at the
+  configured rate plus 60 s), with no button to press meanwhile. The board
+  clears its output bit while the volts are still coming down (nai at
+  +100 V: off at 13:23:23, still 13.5 V two seconds later), so the bit alone
+  is not enough. A channel that is off with volts still on it is shown the
+  same way even without the service's record (after a restart, say);
+  *disabled* at the supply still wins over that;
 - **ramping up…** while it ramps up; *turn off* stays available, as the way
   to stop a ramp, and its confirmation says so.
 

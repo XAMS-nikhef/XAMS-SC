@@ -347,7 +347,7 @@
            stays a few seconds after; turning on is "on" at once and ramps
            up after. Until the board has got there the row says where it is
            going, not where it was (14 October 2026). #}
-        {% elif c.switching or c.ramping == 'down' %}
+        {% elif c.switching or c.ramping == 'down' or c.discharging %}
           <span class="dot warn"></span><span class="warn">switching off…</span>
         {% elif c.ramping == 'up' %}
           <span class="dot good"></span><span class="good">ramping up…</span>
@@ -380,8 +380,9 @@
                   class="hv-btn off"
                   title="zero the setpoint, switch it off and clear the board's alarm. The channel stays off at 0 V."
           >clear trip</button>
-        {% elif c.switching or c.ramping == 'down' %}
-          {# On its way off: nothing to press until it is there. #}
+        {% elif c.switching or c.ramping == 'down' or c.discharging %}
+          {# On its way off: nothing to press until it is there - output off
+             AND the volts gone. #}
           <button type="button" class="hv-btn working" disabled>switching off…</button>
         {% elif c.energised is not none and not c.switched_off %}
           {# While ramping up, "turn off" stays: it is how a ramp is stopped,
