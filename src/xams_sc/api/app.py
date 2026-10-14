@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import logging
 import math
-from datetime import datetime
+from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -811,7 +811,21 @@ def create_app(broker: str = "127.0.0.1", port: int = 1883, *,
             bits = {"word": f"0x{word:08X}",
                     "on": [name for name, on in decode_system_status(word).items() if on],
                     "named": len(SYSTEM_STATUS_BITS)}
-        return page(request, "rga.html", info=state.rga_info(),
+        # The page judges on/off from the service's own record, published
+        # every read (every second while something switches), not from the
+        # rga_* channels, which are 10-s means: deciding the buttons from
+        # those brought "Switch emission on" back while emission was already
+        # coming on (13 October 2026). The channels remain the fallback when
+        # the record is old or missing.
+        info = state.rga_info()
+        live = False
+        try:
+            from ..model import parse_iso
+            age = (datetime.now(timezone.utc) - parse_iso(info["t"])).total_seconds()
+            live = age < 30
+        except (KeyError, TypeError, ValueError):
+            pass
+        return page(request, "rga.html", info=info, live=live,
                     channels=channels, bits=bits,
                     ok=request.query_params.get("ok"),
                     error=request.query_params.get("error"))

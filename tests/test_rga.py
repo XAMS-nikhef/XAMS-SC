@@ -864,6 +864,24 @@ class TestThePageLayout:
         body = self.page_with(webui, emission=1.0)
         assert 'value="off"' in body and "Switch emission off" in body
 
+    def test_on_off_follows_the_live_record_not_the_10_s_channel(self, webui):
+        """13 October 2026: the channel (a 10-s mean) still said off after the
+        service's record had stopped saying "switching", so "Switch emission
+        on" came back for a few seconds while emission was on."""
+        client, app, bus = webui
+        from datetime import datetime, timezone
+        bus.deliver(TOPIC_RGA_INFO, json.dumps({
+            "t": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "identity": {"name": "RGA PrismaPro A 200 47504651"},
+            "control": {"controlled": True, "us": True, "client": "xams-sc"},
+            "recipes": {}, "emission": {"on": True, "pending": None},
+            "em": {"on": False, "pending": None},
+            "guard": {"ok": True, "em_ok": True, "reason": "", "em_reason": ""}}))
+        deliver(bus, "rga_control", 1.0, "code")
+        deliver(bus, "rga_emission", 0.0, "bool")          # not caught up yet
+        body = client.get("/rga").text
+        assert "Switch emission off" in body and "Switch emission on" not in body
+
     @pytest.mark.parametrize("emission, wanted, label", [
         (0.0, "On", "Emission starting…"), (1.0, "Off", "Emission stopping…")])
     def test_while_switching_no_emission_button_can_be_pressed(
