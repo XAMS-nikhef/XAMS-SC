@@ -36,7 +36,7 @@ def test_only_hv_monitor_and_setpoint_channels_are_kept():
     assert keeps_history("hv_cathode_imon")
     assert keeps_history("hv_cathode_vset")
     assert not keeps_history("hv_cathode_stat")
-    assert not keeps_history("tt401")
+    assert not keeps_history("pmain")      # tt401 is kept since 14 Oct 2026 (Lake Shore plot)
 
 
 def test_bus_readings_are_remembered_and_bad_ones_are_not(app):
@@ -46,10 +46,10 @@ def test_bus_readings_are_remembered_and_bad_ones_are_not(app):
     state._on_measurement("m", payload("hv_cathode_vmon", -1701.0, now - 10))
     state._on_measurement("m", payload("hv_cathode_vmon", None, now - 5))
     state._on_measurement("m", payload("hv_cathode_vmon", -5.0, now - 4, q="error"))
-    state._on_measurement("m", payload("tt401", 20.0, now))
-    h = state.history(["hv_cathode_vmon", "tt401"], 60)
+    state._on_measurement("m", payload("pmain", 1.5, now))
+    h = state.history(["hv_cathode_vmon", "pmain"], 60)
     assert [v for _, v in h["hv_cathode_vmon"]] == [-1700.0, -1701.0]
-    assert h["tt401"] == []
+    assert h["pmain"] == []
 
 
 def test_old_readings_fall_out_of_the_window(app):
@@ -72,13 +72,13 @@ def test_seed_goes_in_front_and_never_duplicates(app):
     assert [v for _, v in pts] == [2100.0, 2150.0, 2200.0]
 
 
-def test_archive_reader_takes_hv_lines_only(tmp_path):
+def test_archive_reader_takes_plotted_lines_only(tmp_path):
     now = time.time()
     day = datetime.now(timezone.utc).date().isoformat()
     lines = [json.dumps({"t": "x", "meta": {"version": "test"}}),
              payload("hv_gate_vmon", -1200.0, now - 100),
              payload("hv_gate_stat", 1.0, now - 100),
-             payload("tt401", 21.0, now - 100),
+             payload("pmain", 1.5, now - 100),
              payload("hv_gate_imon", 0.5, now - 100, q="stale"),
              '{"t": "half a line',
              payload("hv_gate_vmon", -1190.0, now - 99999)]
@@ -123,9 +123,50 @@ def test_window_is_clamped(app):
 
 def test_page_has_a_plot_per_supply_and_window_buttons_that_do_not_submit(app):
     html = ui_client(app).get("/hv").text
-    assert html.count('class="hv-plot"') == 2
+    assert html.count('class="hv-plot"') == 4      # + the Lake Shore and flow cards
     assert 'data-supply="hv_1"' in html and 'data-supply="hv_2"' in html
     for w in ("900", "3600", "21600"):
         assert f'<button type="button" class="hv-btn" data-window="{w}">' in html
     assert "/api/hv/history" in html
     assert 'class="swatch"' in html
+
+
+# ---- the Lake Shore and flow plots on the Control page (14 October 2026) ----
+
+def test_the_cards_channels_are_kept_in_history():
+    from xams_sc.api.state import keeps_history
+    for ch in ("tt401", "tt402", "ls_setpoint_1", "ls_heater_1", "fm101", "fm101_total"):
+        assert keeps_history(ch), ch
+    assert not keeps_history("pmain")
+
+
+def test_plots_history_answers_only_plotted_channels(app):
+    state = app.state.system
+    now = time.time()
+    for ch, v in (("tt401", -90.1), ("fm101", 0.06), ("fm101_total", 2200.1),
+                  ("pmain", 1.5)):
+        state._on_measurement("m", payload(ch, v, now - 5))
+    d = ui_client(app).get(
+        "/api/plots/history?window=900&channels=tt401,fm101,fm101_total,pmain").json()
+    assert set(d["series"]) == {"tt401", "fm101", "fm101_total"}
+    assert [p[1] for p in d["series"]["tt401"]] == [-90.1]
+    assert [p[1] for p in d["series"]["fm101_total"]] == [2200.1]
+
+
+def test_the_lake_shore_and_flow_cards_carry_a_plot(app):
+    html = ui_client(app).get("/hv").text
+    assert 'data-plot="lakeshore"' in html and 'data-plot="flow"' in html
+    assert html.count('class="hv-plot"') == 4      # two supplies, two cards
+
+
+def test_the_archive_seed_reads_the_cards_channels(tmp_path):
+    import json as _json
+    from datetime import datetime, timezone
+    now = time.time()
+    t = datetime.fromtimestamp(now - 60, timezone.utc).isoformat().replace("+00:00", "Z")
+    day = datetime.now(timezone.utc).date().isoformat()
+    lines = [_json.dumps({"t": t, "ch": ch, "v": v, "u": "", "q": "ok"})
+             for ch, v in (("tt402", -91.0), ("fm101_total", 2200.0), ("pmain", 1.5))]
+    (tmp_path / f"{day}.jsonl").write_text("\n".join(lines) + "\n")
+    points = read_archive(tmp_path, now - 3600)
+    assert set(points) == {"tt402", "fm101_total"}

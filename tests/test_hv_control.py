@@ -815,3 +815,15 @@ class TestAStatusChangeIsPublishedAtOnce:
         service._accumulate([Measurement(t=utcnow(), channel="hv_anode_vmon", value=600.0,
                                          unit="V", raw=600.0, quality=Quality.OK)])
         assert service.bus.measured("hv_anode_vmon") is None
+
+
+def test_a_switch_that_worked_says_nothing_green(webui):
+    """14 October 2026: the button shows the new state; the green banner only
+    pushed the page down. A refusal still comes back in red."""
+    from doubles import stub_commands
+    http, app, bus = webui
+    stub_commands(app)
+    r = http.post("/hv/output", data={"channel": "hv_anode_vset", "on": "1"},
+                  follow_redirects=False)
+    assert r.status_code == 303
+    assert "hv_ok" not in r.headers["location"]

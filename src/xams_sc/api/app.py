@@ -700,10 +700,12 @@ def create_app(broker: str = "127.0.0.1", port: int = 1883, *,
                                 "by": who},
                                match=("channel",))
         if answer.get("ok"):
-            detail = answer.get("detail") or ("on" if wanted else "off")
             log.warning("HV output %s -> %s by %s", channel,
                         "on" if wanted else "off", who)
-            return _redirect_hv(None, f"{_short(channel)}: {detail}")
+            # NO green message for a switch that worked (14 October 2026):
+            # the button itself shows the new state, and the banner only
+            # pushed the page down. A refusal still says why, in red.
+            return RedirectResponse("/hv#hv", status_code=303)
         return _redirect_hv(f"{_short(channel)}: {answer.get('reason')}")
 
     @app.post("/hv/clear")
@@ -956,6 +958,18 @@ def create_app(broker: str = "127.0.0.1", port: int = 1883, *,
             } for index, name, with_i in rows]})
         return JSONResponse({"now": datetime.now(timezone.utc).timestamp(),
                              "window": window, "supplies": supplies})
+
+    @app.get("/api/plots/history")
+    def plots_history(channels: str = "", window: int = 900):
+        """Recent readings of the non-HV channels the Control page plots
+        (the Lake Shore and flow cards), from the same in-memory history as
+        /api/hv/history. Only channels the history keeps are answered."""
+        from .state import PLOTTED_CHANNELS
+        window = max(60, min(int(window), HISTORY_S))
+        wanted = [c for c in channels.split(",") if c in PLOTTED_CHANNELS]
+        return JSONResponse({"now": datetime.now(timezone.utc).timestamp(),
+                             "window": window,
+                             "series": state.history(wanted, window)})
 
     @app.get("/hv", response_class=HTMLResponse)
     def high_voltage(request: Request):

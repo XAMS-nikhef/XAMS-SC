@@ -85,7 +85,7 @@ channels:
     device: cdaq
     phys: 9207/ai6
     kind: voltage
-    offset: 0.0
+    offset: 0.059
     multiplier: 6.0
     unit: g/min               # mass flow. NOT SLPM — the old label is wrong (§4.2)
     legacy: FM101
