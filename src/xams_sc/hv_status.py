@@ -112,6 +112,17 @@ def is_energised(word: int) -> bool:
     return bool(word & (1 << BIT_ON))
 
 
+def ramping(word: int) -> str | None:
+    """"up" or "down" while the board ramps the output (bits 1 and 2), else
+    None. Turning on sets bit 0 at once and the ramp up follows; turning off
+    starts a ramp down with bit 0 still set (§10a)."""
+    if word >> BIT_RAMP_UP & 1:
+        return "up"
+    if word >> BIT_RAMP_DOWN & 1:
+        return "down"
+    return None
+
+
 def is_disabled(word: int) -> bool:
     """Is it explicitly DISABLED? Bit 10.
 

@@ -94,6 +94,13 @@ ACK_HV_CLEAR = "xams/ack/caen/clear"
 # 23 September 2026). It is shown on /hv, logged and audited.
 TOPIC_HV_TRIP = "xams/hv/trip"
 
+# A channel on its way OFF, per hv_vset channel (`xams/hv/switching/<name>`),
+# retained; empty when it has got there. Turning off starts a ramp down and
+# STAT bit 0 stays set until the output is at zero - and for some seconds
+# after (29 September 2026) - so without this the page showed the channel
+# "on" with "turn off" offered again for the whole ramp (14 October 2026).
+TOPIC_HV_SWITCHING = "xams/hv/switching"
+
 # THE MASTER NOTIFICATION SWITCH (§4.4a). Turns alarm DELIVERY off and on for
 # the whole system - the engine keeps evaluating, publishing and recording,
 # and simply stops waking people up. It exists because the slow control runs

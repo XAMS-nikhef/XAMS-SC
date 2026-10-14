@@ -692,3 +692,117 @@ class TestWhenTheZeroingCannotBeDone:
 
         assert reader.written == []
         assert reader.vset == 2250.0
+
+
+# ================================================================ switching
+#
+# 14 October 2026: the row and its button came back before the board had
+# got there - OFF keeps STAT bit 0 through the ramp down (and some seconds
+# after), ON is "on" at once and ramps up after - and a poll sample taken
+# before a command could be published after it.
+
+from datetime import timedelta  # noqa: E402
+
+from xams_sc.bus import TOPIC_HV_SWITCHING  # noqa: E402
+from xams_sc.hv_status import BIT_RAMP_DOWN, ramping  # noqa: E402
+
+ON_RAMPING_DOWN = (1 << BIT_ON) | (1 << BIT_RAMP_DOWN)
+
+
+def stat_sample(word, t=None, channel="hv_nai_stat"):
+    return Measurement(t=t or utcnow(), channel=channel, value=float(word),
+                       unit="bits", raw=float(word), quality=Quality.OK)
+
+
+class TestSwitchingIsShownUntilItIsDone:
+    @pytest.fixture
+    def service(self, tmp_path):
+        svc = CaenService(load(), RecordingBus(), simulate=False, lock_dir=tmp_path)
+        nai = FakeReader(stat=1 << BIT_ON, vset=600.0)
+
+        def ramp_down(channel, on):
+            # As the board does: OFF starts a ramp down with bit 0 still set.
+            nai.outputs.append(on)
+            nai.stat = (1 << BIT_ON) | (0 if on else 1 << BIT_RAMP_DOWN)
+            return True, ""
+        nai.set_output = ramp_down
+        svc._readers = {"hv_1": FakeReader(), "hv_2": nai}
+        return svc
+
+    def switching(self, service):
+        payloads = service.bus.published_on(TOPIC_HV_SWITCHING + "/hv_nai_vset")
+        return json.loads(payloads[-1]) if payloads and payloads[-1] else None
+
+    def test_turning_off_is_switching_until_bit_0_clears(self, service):
+        assert energise(service, on=False)["ok"]
+        assert self.switching(service)["wanted"] == "off"
+        service._accumulate([stat_sample(ON_RAMPING_DOWN)])
+        service._accumulate([stat_sample(1 << BIT_ON)])     # ramp over, still ON
+        assert self.switching(service) is not None
+        service._accumulate([stat_sample(0)])
+        assert self.switching(service) is None
+
+    def test_it_is_given_up_after_the_ramp_time_and_a_margin(self, service):
+        energise(service, on=False)
+        service._switching["hv_nai_vset"]["_until"] = 0.0
+        service._accumulate([stat_sample(1 << BIT_ON)])
+        assert self.switching(service) is None
+
+    def test_the_wait_is_the_ramp_time_at_the_configured_rate(self, service):
+        channel = next(c for c in service._channels if c.name == "hv_nai_vset")
+        spec = next(s for s in service._specs if s["id"] == "hv_2")
+        rdw = spec["expect"][int(channel.phys)]["rdw"]
+        assert service._off_wait_s(channel, 600.0) == pytest.approx(600.0 / rdw + 60.0)
+
+    def test_turning_on_clears_a_switching_record(self, service):
+        energise(service, on=False)
+        energise(service, on=True)
+        assert self.switching(service) is None
+
+    def test_the_ramp_bits_read_as_up_and_down(self):
+        assert ramping(0b011) == "up" and ramping(0b101) == "down"
+        assert ramping(0b001) is None
+
+
+class TestAStalePollSampleCannotUndoACommand:
+    @pytest.fixture
+    def service(self, tmp_path):
+        svc = CaenService(load(), RecordingBus(), simulate=False, lock_dir=tmp_path)
+        svc._readers = {"hv_1": FakeReader(stat=0), "hv_2": FakeReader(stat=0)}
+        return svc
+
+    def test_a_sample_taken_before_the_command_is_dropped(self, service):
+        before = utcnow() - timedelta(seconds=1)
+        energise(service)
+        service._accumulate([stat_sample(0, t=before)])
+        assert "hv_nai_stat" not in service._window
+        assert int(service.bus.measured("hv_nai_stat").value) & (1 << BIT_ON)
+
+    def test_a_sample_taken_after_it_is_kept(self, service):
+        energise(service)
+        service._accumulate([stat_sample(1 << BIT_ON)])
+        assert len(service._window["hv_nai_stat"]) == 1
+
+
+class TestAStatusChangeIsPublishedAtOnce:
+    @pytest.fixture
+    def service(self, tmp_path):
+        svc = CaenService(load(), RecordingBus(), simulate=False, lock_dir=tmp_path)
+        svc._readers = {"hv_1": FakeReader(), "hv_2": FakeReader()}
+        return svc
+
+    def test_a_change_is_published_without_waiting_for_the_window(self, service):
+        service._accumulate([stat_sample(0)])
+        service._accumulate([stat_sample(1 << BIT_ON)])
+        assert [int(m.value) for m in service.bus.measurements
+                if m.channel == "hv_nai_stat"] == [0, 1]
+
+    def test_an_unchanged_word_is_not_published_again(self, service):
+        for _ in range(5):
+            service._accumulate([stat_sample(1 << BIT_ON)])
+        assert len([m for m in service.bus.measurements if m.channel == "hv_nai_stat"]) == 1
+
+    def test_a_voltage_is_still_only_averaged(self, service):
+        service._accumulate([Measurement(t=utcnow(), channel="hv_nai_vmon", value=600.0,
+                                         unit="V", raw=600.0, quality=Quality.OK)])
+        assert service.bus.measured("hv_nai_vmon") is None

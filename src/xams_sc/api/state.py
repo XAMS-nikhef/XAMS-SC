@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from ..bus import (ACK_HV_CLEAR, ACK_HV_OUTPUT, ACK_HV_VSET, ACK_LS_RANGE, ACK_LS_SETPOINT,
                    ACK_NOTIFY, ACK_RGA_CONTROL, ACK_RGA_EM, ACK_RGA_EMISSION, ACK_RGA_SAVE, ACK_RGA_SCAN,
                    TOPIC_RGA_SCANDATA, TOPIC_ALARM, TOPIC_BACKUP, TOPIC_FLOW_RESET,
-                   TOPIC_HV_TRIP, TOPIC_MEAS, TOPIC_RELOAD, TOPIC_RGA_INFO,
+                   TOPIC_HV_SWITCHING, TOPIC_HV_TRIP, TOPIC_MEAS, TOPIC_RELOAD, TOPIC_RGA_INFO,
                    TOPIC_STATUS,
                    AckInbox, Bus)
 from ..model import Measurement, Quality, ServiceState, parse_iso, utcnow
@@ -102,6 +102,7 @@ class SystemState:
         # Latched HV trips, by hv_vset channel, from the CAEN service's
         # retained records. Emptied by a clear.
         self._hv_trips: dict[str, dict] = {}
+        self._hv_switching: dict[str, dict] = {}
         self.started = utcnow()
 
     # ---------------------------------------------------------------- inputs
@@ -283,6 +284,25 @@ class SystemState:
             if isinstance(record, dict):
                 self._hv_trips[channel] = record
 
+    def _on_hv_switching(self, topic: str, payload: str) -> None:
+        channel = topic.rsplit("/", 1)[-1]
+        with self._lock:
+            if not payload.strip():
+                self._hv_switching.pop(channel, None)
+                return
+            try:
+                record = json.loads(payload)
+            except ValueError:
+                return
+            if isinstance(record, dict):
+                self._hv_switching[channel] = record
+
+    def hv_switching(self, channel: str) -> dict | None:
+        """A channel turned off and not yet off (hv_vset name), or None."""
+        with self._lock:
+            record = self._hv_switching.get(channel)
+            return None if record is None else dict(record)
+
     def hv_trip(self, channel: str) -> dict | None:
         """The latched trip on an hv_vset channel, or None."""
         with self._lock:
@@ -387,6 +407,7 @@ class SystemState:
         self.bus.subscribe(f"{TOPIC_STATUS}/#", self._on_status)
         self.bus.subscribe(f"{TOPIC_ALARM}/#", self._on_alarm)
         self.bus.subscribe(f"{TOPIC_HV_TRIP}/+", self._on_hv_trip)
+        self.bus.subscribe(f"{TOPIC_HV_SWITCHING}/+", self._on_hv_switching)
         self.bus.subscribe(TOPIC_RELOAD, self._on_reload)
         self.bus.connect()
         self.bus.publish_state("webui", ServiceState.RUNNING)
