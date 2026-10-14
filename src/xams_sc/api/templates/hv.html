@@ -243,6 +243,9 @@ body[data-hv-window="21600"] .hv-plot button[data-window="21600"] {
 <div id="hv" style="height:1.6rem"></div>
 
 {% if hv_ok %}<div class="flash good" style="margin:0 0 1rem 0">{{ hv_ok }}</div>{% endif %}
+{# Where a refusal from an ON/OFF or trip-clear button is shown when the page
+   sent it in the background (no reload; see the script below). #}
+<div id="hv-msg"></div>
 {% if hv_error %}<div class="flash bad" style="margin:0 0 1rem 0">
   <strong>Refused — nothing was changed for these.</strong> {{ hv_error }}</div>{% endif %}
 
@@ -652,6 +655,7 @@ function confirmSetpoints(form) {
 // of the window being closed.
 document.addEventListener('submit', function (e) {
   var form = e.target;
+  if (e.defaultPrevented) return;              // cancelled at the confirm
   if (!form.id || form.id.lastIndexOf('out-', 0) !== 0) return;
   var btn = document.querySelector('button[form="' + form.id + '"]');
   if (!btn) return;
@@ -669,8 +673,47 @@ document.addEventListener('submit', function (e) {
 (function () {
   var LIVE = ['cryostat', 'flow', 'setpoints', 'hv-forms'];
   var busy = false;
+  // THE SWITCH BUTTONS DO NOT RELOAD THE PAGE (14 October 2026). ON / OFF
+  // and clear-trip were plain form posts answered with a redirect, so the
+  // whole page was loaded again and the browser landed somewhere else on it.
+  // They are now sent in the background and the page is refreshed in place,
+  // like the 10-s refresh does: nothing moves. A refusal comes back as the
+  // redirect's hv_error and is shown in red above the tables. Without
+  // JavaScript the forms still post the old way.
+  function showMessage(text) {
+    var box = document.getElementById('hv-msg');
+    if (!box) return;
+    box.innerHTML = '';
+    if (!text) return;
+    var d = document.createElement('div');
+    d.className = 'flash bad'; d.style.margin = '0 0 1rem 0';
+    var b = document.createElement('strong');
+    b.textContent = 'Refused - nothing was changed for these. ';
+    d.appendChild(b); d.appendChild(document.createTextNode(text));
+    box.appendChild(d);
+  }
   document.addEventListener('submit', function (e) {
-    if (!e.defaultPrevented) busy = true;
+    if (e.defaultPrevented) return;              // cancelled at the confirm
+    var form = e.target;
+    var quiet = form.id && (form.id.lastIndexOf('out-', 0) === 0
+                            || form.id.lastIndexOf('clr-', 0) === 0);
+    if (!quiet) { busy = true; return; }         // every other form: as before
+    e.preventDefault();
+    busy = true;
+    fetch(form.getAttribute('action'), {
+      method: 'POST', body: new URLSearchParams(new FormData(form)),
+      cache: 'no-store', redirect: 'follow'
+    }).then(function (r) {
+      showMessage(new URL(r.url, location.href).searchParams.get('hv_error'));
+    }).catch(function () {
+      showMessage('the web UI did not answer - the command may not have been sent.');
+    }).then(function () {
+      busy = false;
+      // The clicked button has the focus, and a part holding the focus is not
+      // swapped - so let go of it, or it would stay "switching…".
+      if (document.activeElement) document.activeElement.blur();
+      return refresh(true);
+    });
   });
   window.addEventListener('pageshow', function (e) {
     if (e.persisted) { busy = false; refresh(true); }
