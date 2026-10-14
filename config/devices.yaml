@@ -40,6 +40,10 @@ caen:
     # limit are configured on the instrument and stay there — that is what
     # keeps the software out of the protection path.
     #
+    # ISET (current limit), set by AP on 14 October 2026: 10 uA on the screens
+    # and electrodes, 20 uA on the two PMTs - their bases draw ~7.6 uA at -950 V
+    # on their own, and under Cs load the anode current adds ~55 % of that
+    # (1 October analysis), ~12 uA in all: 10 uA would limit them.
     # Ramp rates set on the supplies by AP on 14 October 2026: PMTs up 10 V/s,
     # screens (and electrodes) up 25 V/s, everything down 50 V/s. Slower up
     # than down on purpose: a breakdown announces itself in IMON while the
@@ -47,8 +51,8 @@ caen:
     expect:
       0: {pol: "-", maxv: 1100, rup: 10, rdw: 50,  trip: 2.0,  iset: 20}
       1: {pol: "-", maxv: 1100, rup: 10, rdw: 50,  trip: 10.0, iset: 20}
-      2: {pol: "-", maxv: 1710, rup: 25, rdw: 50,  trip: 10.0, iset: 5}
-      3: {pol: "-", maxv: 2000, rup: 25, rdw: 50,  trip: 10.0, iset: 5}
+      2: {pol: "-", maxv: 1710, rup: 25, rdw: 50,  trip: 10.0, iset: 10}
+      3: {pol: "-", maxv: 2000, rup: 25, rdw: 50,  trip: 10.0, iset: 10}
     # TBD (§16): channel 0 trips at 2.0 where every other channel is 10.0.
     # Confirm this is intent, not history.
   - id: hv_2
@@ -67,7 +71,7 @@ caen:
     # the NaI. Ramp rates as on hv_1: up 25 V/s, down 50 V/s.
     # Read and alarmed on mismatch, never written (§8.3).
     expect:
-      0: {pol: "-", maxv: 4000, rup: 25, rdw: 50,  trip: 10.0, iset: 310}
+      0: {pol: "-", maxv: 4000, rup: 25, rdw: 50,  trip: 10.0, iset: 10}
       2: {pol: "+", maxv: 4500, rup: 25, rdw: 50,  trip: 10.0, iset: 10}
       3: {pol: "+", maxv: 500,  rup: 25, rdw: 50,  trip: 10.0, iset: 10}
     # Plotted on /hv without its current (14 October 2026): the NaI base
