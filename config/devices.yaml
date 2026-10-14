@@ -39,13 +39,22 @@ caen:
     # writes them (§8.3, §10 rule 2). Ramp rate, trip current and over-voltage
     # limit are configured on the instrument and stay there — that is what
     # keeps the software out of the protection path.
+    #
+    # ISET (current limit), set by AP on 14 October 2026: 10 uA on the screens
+    # and electrodes, 20 uA on the two PMTs - their bases draw ~7.6 uA at -950 V
+    # on their own, and under Cs load the anode current adds ~55 % of that
+    # (1 October analysis), ~12 uA in all: 10 uA would limit them.
+    # Ramp rates set on the supplies by AP on 14 October 2026: PMTs up 10 V/s,
+    # screens (and electrodes) up 25 V/s, everything down 50 V/s. Slower up
+    # than down on purpose: a breakdown announces itself in IMON while the
+    # voltage rises, and 25 V/s leaves time to see it.
     expect:
-      0: {pol: "-", maxv: 1100, rup: 1,  rdw: 20,  trip: 2.0,  iset: 20}
-      1: {pol: "-", maxv: 1100, rup: 20, rdw: 20,  trip: 10.0, iset: 20}
-      2: {pol: "-", maxv: 1710, rup: 50, rdw: 50,  trip: 10.0, iset: 5}
-      3: {pol: "-", maxv: 2000, rup: 50, rdw: 50,  trip: 10.0, iset: 5}
-    # TBD (§16): channel 0 ramps at 1 V/s and trips at 2.0 uA where every
-    # other channel is 20-50 and 10.0. Confirm this is intent, not history.
+      0: {pol: "-", maxv: 1100, rup: 10, rdw: 50,  trip: 2.0,  iset: 20}
+      1: {pol: "-", maxv: 1100, rup: 10, rdw: 50,  trip: 10.0, iset: 20}
+      2: {pol: "-", maxv: 1710, rup: 25, rdw: 50,  trip: 10.0, iset: 10}
+      3: {pol: "-", maxv: 2000, rup: 25, rdw: 50,  trip: 10.0, iset: 10}
+    # TBD (§16): channel 0 trips at 2.0 where every other channel is 10.0.
+    # Confirm this is intent, not history.
   - id: hv_2
     match: {vid: "21E1", pid: "0003"}
     board_address: 0           # BOTH units are address 0: two separate USB
@@ -53,13 +62,18 @@ caen:
     board_serial: "79"
     firmware: "1.04"
     baud: 9600
-    # cathode / gate / anode / NaI — anode and NaI positive.
+    # cathode / (disconnected) / anode / gate since 14 October 2026 — anode
+    # AND GATE positive. The gate moved from channel 1 to channel 3, the NaI
+    # detector's former (positive) channel, because the SiPM-neutral operating
+    # point CM-B needs a positive gate (+303 V; see channels.yaml). Channel 1
+    # is disconnected and has no expectations. Channel 3 on the supply: +,
+    # MAXV 500 (software limit +400), ISET 10 - it was MAXV 1000, ISET 150 for
+    # the NaI. Ramp rates as on hv_1: up 25 V/s, down 50 V/s.
     # Read and alarmed on mismatch, never written (§8.3).
     expect:
-      0: {pol: "-", maxv: 4000, rup: 25, rdw: 50,  trip: 10.0, iset: 310}
-      1: {pol: "-", maxv: 3750, rup: 50, rdw: 100, trip: 10.0, iset: 10}
-      2: {pol: "+", maxv: 4500, rup: 50, rdw: 50,  trip: 10.0, iset: 10}
-      3: {pol: "+", maxv: 1000, rup: 50, rdw: 50,  trip: 10.0, iset: 150}
+      0: {pol: "-", maxv: 4000, rup: 25, rdw: 50,  trip: 10.0, iset: 10}
+      2: {pol: "+", maxv: 4500, rup: 25, rdw: 50,  trip: 10.0, iset: 10}
+      3: {pol: "+", maxv: 500,  rup: 25, rdw: 50,  trip: 10.0, iset: 10}
     # Plotted on /hv without its current (14 October 2026): the NaI base
     # divider draws a steady current that nobody watches and that would set
     # the scale of the electrode currents on a linear axis.

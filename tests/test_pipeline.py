@@ -53,10 +53,11 @@ class TestSimService:
         by_name = {m.channel: m.value for m in svc.read()}
 
         assert by_name["hv_cathode_vmon"] < 0
-        assert by_name["hv_gate_vmon"] < 0
+        # The gate is POSITIVE since 14 October 2026 (CM-B, SiPMs at ground).
+        assert by_name["hv_gate_vmon"] > 0
         assert by_name["hv_pmt_top_vmon"] < 0
         assert by_name["hv_anode_vmon"] > 0
-        assert by_name["hv_nai_vmon"] > 0
+        assert by_name["hv_anode_vmon"] > 0
 
     def test_simulated_hv_stays_within_the_software_limits(self, config, tmp_path):
         svc = SimService(config, RecordingBus(), lock_dir=tmp_path)
@@ -116,12 +117,12 @@ class TestAveraging:
 
         now = utcnow()
         for word in (3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 1.0, 1.0, 1.0, 1.0):
-            svc._accumulate([Measurement(t=now, channel="hv_nai_stat",
+            svc._accumulate([Measurement(t=now, channel="hv_anode_stat",
                                          value=word, unit="bits", raw=word)])
         svc._emit_window()
 
         published = [m for m in bus.measurements
-                     if m.channel == "hv_nai_stat"][0]
+                     if m.channel == "hv_anode_stat"][0]
         assert published.value == 1.0, "the mean of a bitmask was published"
         assert int(published.value) & 1, "decodes as not energised"
         assert published.raw == 1.0
@@ -137,14 +138,14 @@ class TestAveraging:
         svc = SimService(config, bus, lock_dir=tmp_path)
 
         now = utcnow()
-        svc._accumulate([Measurement(t=now, channel="hv_nai_stat", value=None,
+        svc._accumulate([Measurement(t=now, channel="hv_anode_stat", value=None,
                                      unit="bits", quality=Quality.ERROR)])
-        svc._accumulate([Measurement(t=now, channel="hv_nai_stat", value=1.0,
+        svc._accumulate([Measurement(t=now, channel="hv_anode_stat", value=1.0,
                                      unit="bits", raw=1.0)])
         svc._emit_window()
 
         published = [m for m in bus.measurements
-                     if m.channel == "hv_nai_stat"][0]
+                     if m.channel == "hv_anode_stat"][0]
         assert published.value == 1.0
         assert published.quality is not Quality.OK
 

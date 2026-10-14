@@ -178,7 +178,7 @@ def test_every_change_is_audited(webui):
 ALL_DEFAULTS = {
     "hv_pmt_bot_vset": "-700", "hv_pmt_top_vset": "0",
     "hv_ts_vset": "-500", "hv_bs_vset": "-600",
-    "hv_cathode_vset": "-2250", "hv_gate_vset": "-1750",
+    "hv_cathode_vset": "-2250", "hv_gate_vset": "303",
     "hv_anode_vset": "4200", "hv_nai_vset": "600",
 }
 
@@ -209,7 +209,7 @@ def test_a_field_left_out_of_the_form_is_not_cleared(webui, config_dir):
     body = yaml.safe_load((config_dir / "hv_defaults.yaml").read_text())
     assert body["defaults"]["hv_cathode_vset"] == -1500.0
     assert body["defaults"]["hv_anode_vset"] == 4200.0
-    assert body["defaults"]["hv_gate_vset"] == -1750.0
+    assert body["defaults"]["hv_gate_vset"] == 303.0  # positive since 14 Oct 2026 (CM-B)
     # And only the one that really changed is audited.
     audits = [p for topic, p in bus.published if topic == "xams/audit"]
     assert len(audits) == 1
