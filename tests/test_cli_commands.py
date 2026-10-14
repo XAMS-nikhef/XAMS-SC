@@ -180,22 +180,22 @@ class TestHvOutput:
 
         assert rc == 0
         sent = [c["channel"] for c in cli.json_on(TOPIC_HV_OUTPUT)]
-        assert "hv_cathode_vset" in sent and "hv_nai_vset" in sent
+        assert "hv_cathode_vset" in sent and "hv_anode_vset" in sent
         assert all(c["on"] is True for c in cli.json_on(TOPIC_HV_OUTPUT))
 
     def test_one_named_channel_sends_one_command(self, cli):
         answers(cli, ACK_HV_OUTPUT, {"ok": True, "on": False})
 
-        xams_ctl.cmd_hv_off(args(channel="hv_nai_vset"))
+        xams_ctl.cmd_hv_off(args(channel="hv_anode_vset"))
 
         assert cli.json_on(TOPIC_HV_OUTPUT) == [
-            {"channel": "hv_nai_vset", "on": False, "by": "apc"}]
+            {"channel": "hv_anode_vset", "on": False, "by": "apc"}]
 
     def test_a_refusal_among_several_is_counted_and_named(self, cli, capsys):
         """A batch that reported "3 of 4 succeeded" without saying which would
         be worse than useless on a rack of electrodes."""
         def reply(cmd):
-            if cmd["channel"] == "hv_nai_vset":
+            if cmd["channel"] == "hv_anode_vset":
                 return {"ok": False, "reason": "the front-panel switch is off"}
             return {"ok": True, "channel": cmd["channel"], "on": True}
         answers(cli, ACK_HV_OUTPUT, reply)
@@ -204,15 +204,15 @@ class TestHvOutput:
 
         out = capsys.readouterr().out
         assert rc == 1
-        assert "hv_nai_vset" in out
+        assert "hv_anode_vset" in out
         assert "the front-panel switch is off" in out
-        assert "1 of 8 refused or unanswered" in out
+        assert "1 of 7 refused or unanswered" in out  # 8 until the NaI was disabled
 
     def test_the_detail_is_shown_when_the_service_gives_one(self, cli, capsys):
         answers(cli, ACK_HV_OUTPUT, {
             "ok": True, "on": True, "detail": "ramping to +200.0 V"})
 
-        xams_ctl.cmd_hv_on(args(channel="hv_nai_vset"))
+        xams_ctl.cmd_hv_on(args(channel="hv_anode_vset"))
 
         assert "ramping to +200.0 V" in capsys.readouterr().out
 

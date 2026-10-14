@@ -339,7 +339,7 @@ class TestWhatTheDriverCannotDo:
                     "a protection setting is written: %s" % line.strip())
 
 
-def energise(service, channel="hv_nai_vset", on=True, by="ap"):
+def energise(service, channel="hv_anode_vset", on=True, by="ap"):
     service._handle_output(TOPIC_HV_OUTPUT, json.dumps(
         {"channel": channel, "on": on, "by": by}))
     return service.bus.last_json(ACK_HV_OUTPUT)
@@ -366,20 +366,20 @@ class TestEnergisingSaysSoAtOnce:
 
     def test_the_status_word_is_published_without_waiting_for_the_poll(self, service):
         assert energise(service)["ok"] is True
-        m = service.bus.measured("hv_nai_stat")
+        m = service.bus.measured("hv_anode_stat")
         assert m is not None, "the page still had to wait for the next poll"
         assert int(m.value) & (1 << BIT_ON), "published as not energised"
 
     def test_it_is_published_as_a_good_reading_of_the_right_channel(self, service):
         energise(service)
-        m = service.bus.measured("hv_nai_stat")
+        m = service.bus.measured("hv_anode_stat")
         assert m.quality == Quality.OK
         assert m.unit == "bits"
         assert m.raw == m.value
 
     def test_it_matches_what_the_board_now_reports(self, service):
         energise(service)
-        assert service.bus.measured("hv_nai_stat").value == float(
+        assert service.bus.measured("hv_anode_stat").value == float(
             service._readers["hv_2"].stat)
 
     def test_the_straddling_window_is_dropped(self, service):
@@ -389,11 +389,11 @@ class TestEnergisingSaysSoAtOnce:
         switch average to a fraction, and int(0.4) is 0 - the page would have
         gone back to "not energised" seconds after this said otherwise.
         """
-        service._accumulate([Measurement(t=utcnow(), channel="hv_nai_stat",
+        service._accumulate([Measurement(t=utcnow(), channel="hv_anode_stat",
                                          value=0.0, unit="bits", raw=0.0,
                                          quality=Quality.OK)] * 9)
         energise(service)
-        assert "hv_nai_stat" not in service._window
+        assert "hv_anode_stat" not in service._window
 
     def test_only_the_channel_commanded_is_republished(self, service):
         energise(service)
@@ -402,7 +402,7 @@ class TestEnergisingSaysSoAtOnce:
     def test_turning_off_publishes_the_read_back_too(self, service):
         service._readers["hv_2"].stat = 1 << BIT_ON
         assert energise(service, on=False)["ok"] is True
-        m = service.bus.measured("hv_nai_stat")
+        m = service.bus.measured("hv_anode_stat")
         assert m is not None and not int(m.value) & (1 << BIT_ON)
 
     def test_a_board_refusal_publishes_no_status_at_all(self, service):
@@ -410,14 +410,14 @@ class TestEnergisingSaysSoAtOnce:
         be a fresh timestamp on an unchanged state, which reads as news."""
         service._readers["hv_2"].accepts = False
         assert energise(service)["ok"] is not True
-        assert service.bus.measured("hv_nai_stat") is None
+        assert service.bus.measured("hv_anode_stat") is None
 
     def test_a_disabled_channel_is_refused_and_says_where_the_switch_is(self, service):
         service._readers["hv_2"].stat = 1 << BIT_DISABLED
         answer = energise(service)
         assert answer["ok"] is not True
         assert "front panel" in answer["reason"]
-        assert service.bus.measured("hv_nai_stat") is None
+        assert service.bus.measured("hv_anode_stat") is None
 
 
 
@@ -682,9 +682,10 @@ class TestWhenTheZeroingCannotBeDone:
 
         def status(channel):
             reads["n"] += 1
-            # The poll's reads come first; the write's re-read finds the
-            # switch back on.
-            return DISABLED if reads["n"] <= 4 else ENABLED
+            # The poll's reads come first - one per channel in use on hv_2,
+            # three since the NaI's channel became the gate's - and the
+            # write's re-read finds the switch back on.
+            return DISABLED if reads["n"] <= 3 else ENABLED
 
         reader.status = status
 
@@ -709,7 +710,7 @@ from xams_sc.hv_status import BIT_RAMP_DOWN, ramping  # noqa: E402
 ON_RAMPING_DOWN = (1 << BIT_ON) | (1 << BIT_RAMP_DOWN)
 
 
-def stat_sample(word, t=None, channel="hv_nai_stat"):
+def stat_sample(word, t=None, channel="hv_anode_stat"):
     return Measurement(t=t or utcnow(), channel=channel, value=float(word),
                        unit="bits", raw=float(word), quality=Quality.OK)
 
@@ -730,11 +731,11 @@ class TestSwitchingIsShownUntilItIsDone:
         return svc
 
     def switching(self, service):
-        payloads = service.bus.published_on(TOPIC_HV_SWITCHING + "/hv_nai_vset")
+        payloads = service.bus.published_on(TOPIC_HV_SWITCHING + "/hv_anode_vset")
         return json.loads(payloads[-1]) if payloads and payloads[-1] else None
 
     def vmon(self, volts):
-        return Measurement(t=utcnow(), channel="hv_nai_vmon", value=volts,
+        return Measurement(t=utcnow(), channel="hv_anode_vmon", value=volts,
                            unit="V", raw=abs(volts), quality=Quality.OK)
 
     def test_turning_off_is_switching_until_off_and_at_zero(self, service):
@@ -752,12 +753,12 @@ class TestSwitchingIsShownUntilItIsDone:
 
     def test_it_is_given_up_after_the_ramp_time_and_a_margin(self, service):
         energise(service, on=False)
-        service._switching["hv_nai_vset"]["_until"] = 0.0
+        service._switching["hv_anode_vset"]["_until"] = 0.0
         service._accumulate([stat_sample(1 << BIT_ON)])
         assert self.switching(service) is None
 
     def test_the_wait_is_the_ramp_time_at_the_configured_rate(self, service):
-        channel = next(c for c in service._channels if c.name == "hv_nai_vset")
+        channel = next(c for c in service._channels if c.name == "hv_anode_vset")
         spec = next(s for s in service._specs if s["id"] == "hv_2")
         rdw = spec["expect"][int(channel.phys)]["rdw"]
         assert service._off_wait_s(channel, 600.0) == pytest.approx(600.0 / rdw + 60.0)
@@ -783,13 +784,13 @@ class TestAStalePollSampleCannotUndoACommand:
         before = utcnow() - timedelta(seconds=1)
         energise(service)
         service._accumulate([stat_sample(0, t=before)])
-        assert "hv_nai_stat" not in service._window
-        assert int(service.bus.measured("hv_nai_stat").value) & (1 << BIT_ON)
+        assert "hv_anode_stat" not in service._window
+        assert int(service.bus.measured("hv_anode_stat").value) & (1 << BIT_ON)
 
     def test_a_sample_taken_after_it_is_kept(self, service):
         energise(service)
         service._accumulate([stat_sample(1 << BIT_ON)])
-        assert len(service._window["hv_nai_stat"]) == 1
+        assert len(service._window["hv_anode_stat"]) == 1
 
 
 class TestAStatusChangeIsPublishedAtOnce:
@@ -803,14 +804,14 @@ class TestAStatusChangeIsPublishedAtOnce:
         service._accumulate([stat_sample(0)])
         service._accumulate([stat_sample(1 << BIT_ON)])
         assert [int(m.value) for m in service.bus.measurements
-                if m.channel == "hv_nai_stat"] == [0, 1]
+                if m.channel == "hv_anode_stat"] == [0, 1]
 
     def test_an_unchanged_word_is_not_published_again(self, service):
         for _ in range(5):
             service._accumulate([stat_sample(1 << BIT_ON)])
-        assert len([m for m in service.bus.measurements if m.channel == "hv_nai_stat"]) == 1
+        assert len([m for m in service.bus.measurements if m.channel == "hv_anode_stat"]) == 1
 
     def test_a_voltage_is_still_only_averaged(self, service):
-        service._accumulate([Measurement(t=utcnow(), channel="hv_nai_vmon", value=600.0,
+        service._accumulate([Measurement(t=utcnow(), channel="hv_anode_vmon", value=600.0,
                                          unit="V", raw=600.0, quality=Quality.OK)])
-        assert service.bus.measured("hv_nai_vmon") is None
+        assert service.bus.measured("hv_anode_vmon") is None

@@ -118,7 +118,7 @@ class TestTheCaenServiceInParticular:
         # unnoticed. Verified by deleting the override and watching this fail.
         expected = {c.name for c in config.enabled_channels()
                     if c.device in ("hv_1", "hv_2")}
-        assert len(expected) == 32
+        assert len(expected) == 28  # 32 until the NaI's four were disabled, 14 Oct 2026
 
         service._publish_error("no CAEN channel answered; link lost")
 

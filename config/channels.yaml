@@ -325,17 +325,26 @@ channels:
      legacy: "Cathode", limits: {min: -4000.0, max: 0.0}, description: "TPC cathode"}
   - {name: hv_cathode_imon, device: hv_2, phys: 0, kind: hv_imon, unit: uA,
      description: "TPC cathode current"}
-  - {name: hv_gate_vmon, device: hv_2, phys: 1, kind: hv_vmon, unit: V, sign: -1,
+  # THE GATE MOVED from hv_2 channel 1 to channel 3 on 14 October 2026 (the NaI
+  # detector's channel; the NaI is no longer powered from here and channel 1 is
+  # disconnected). The names stay hv_gate_*: the history, the run snapshots on
+  # the DAQ side and the analysis all address the gate by name, not by channel.
+  # Channel 3 was positive with MAXV 1000 V for the NaI - it must be NEGATIVE
+  # with MAXV >= 3750 V on the supply before the gate is driven from it.
+  - {name: hv_gate_vmon, device: hv_2, phys: 3, kind: hv_vmon, unit: V, sign: -1,
      legacy: "Gate", limits: {min: -3750.0, max: 0.0}, description: "TPC gate"}
-  - {name: hv_gate_imon, device: hv_2, phys: 1, kind: hv_imon, unit: uA,
+  - {name: hv_gate_imon, device: hv_2, phys: 3, kind: hv_imon, unit: uA,
      description: "TPC gate current"}
   - {name: hv_anode_vmon, device: hv_2, phys: 2, kind: hv_vmon, unit: V, sign: 1,
      legacy: "Anode", limits: {min: 0.0, max: 4500.0}, description: "TPC anode"}
   - {name: hv_anode_imon, device: hv_2, phys: 2, kind: hv_imon, unit: uA,
      description: "TPC anode current"}
-  - {name: hv_nai_vmon, device: hv_2, phys: 3, kind: hv_vmon, unit: V, sign: 1,
+  # NaI detector: no HV from the slow control since 14 October 2026 (its
+  # channel now carries the gate). Disabled, not removed, so its history keeps
+  # its name; re-enable with its own channel if it is powered from here again.
+  - {name: hv_nai_vmon, device: hv_2, phys: 3, kind: hv_vmon, unit: V, sign: 1, enabled: false,
      legacy: "NaI", limits: {min: 0.0, max: 1000.0}, description: "external NaI detector"}
-  - {name: hv_nai_imon, device: hv_2, phys: 3, kind: hv_imon, unit: uA,
+  - {name: hv_nai_imon, device: hv_2, phys: 3, kind: hv_imon, unit: uA, enabled: false,
      description: "external NaI detector current"}
 
   # ------------------------------------------------------------------
@@ -367,11 +376,11 @@ channels:
      description: "bottom screen status word"}
   - {name: hv_cathode_stat, device: hv_2, phys: 0, kind: hv_stat, unit: bits,
      description: "TPC cathode status word"}
-  - {name: hv_gate_stat, device: hv_2, phys: 1, kind: hv_stat, unit: bits,
+  - {name: hv_gate_stat, device: hv_2, phys: 3, kind: hv_stat, unit: bits,
      description: "TPC gate status word"}
   - {name: hv_anode_stat, device: hv_2, phys: 2, kind: hv_stat, unit: bits,
      description: "TPC anode status word"}
-  - {name: hv_nai_stat, device: hv_2, phys: 3, kind: hv_stat, unit: bits,
+  - {name: hv_nai_stat, device: hv_2, phys: 3, kind: hv_stat, unit: bits, enabled: false,
      description: "external NaI detector status word"}
 
   # ------------------------------------------------------------------
@@ -414,11 +423,11 @@ channels:
      limits: {min: -2000.0, max: 0.0}, default_setpoint: -600.0, description: "bottom screen setpoint"}
   - {name: hv_cathode_vset, device: hv_2, phys: 0, kind: hv_vset, unit: V, sign: -1,
      limits: {min: -3500.0, max: 0.0}, default_setpoint: -2250.0, description: "TPC cathode setpoint"}
-  - {name: hv_gate_vset, device: hv_2, phys: 1, kind: hv_vset, unit: V, sign: -1,
+  - {name: hv_gate_vset, device: hv_2, phys: 3, kind: hv_vset, unit: V, sign: -1,
      limits: {min: -3750.0, max: 0.0}, default_setpoint: -1750.0, description: "TPC gate setpoint"}
   - {name: hv_anode_vset, device: hv_2, phys: 2, kind: hv_vset, unit: V, sign: 1,
      limits: {min: 0.0, max: 4500.0}, default_setpoint: 4200.0, description: "TPC anode setpoint"}
-  - {name: hv_nai_vset, device: hv_2, phys: 3, kind: hv_vset, unit: V, sign: 1,
+  - {name: hv_nai_vset, device: hv_2, phys: 3, kind: hv_vset, unit: V, sign: 1, enabled: false,
      limits: {min: 0.0, max: 1000.0}, default_setpoint: 600.0, description: "external NaI detector setpoint"}
 
   # ------------------------------------------------------------------

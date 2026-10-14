@@ -160,13 +160,14 @@ class TestTheClearIsBoardWide:
         assert supply.vset[2] == 0.0, "the anode kept 4200 V through a clear"
 
     def test_a_channel_latched_only_in_BDALARM_is_zeroed_too(self, service):
-        supply = TrippableSupply(stat={0: TRIP}, vset={0: 2250.0, 1: 1750.0},
-                                 alarm=0b0011)
+        # The gate, on hv_2 channel 3 since 14 October 2026.
+        supply = TrippableSupply(stat={0: TRIP}, vset={0: 2250.0, 3: 1750.0},
+                                 alarm=0b1001)
         service._readers["hv_2"] = supply
 
         clear(service)
 
-        assert supply.vset[1] == 0.0
+        assert supply.vset[3] == 0.0
 
     def test_healthy_channels_keep_their_setpoints(self, service):
         supply = TrippableSupply(stat={0: TRIP, 3: ON},
