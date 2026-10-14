@@ -114,6 +114,20 @@ body[data-hv-window="21600"] .hv-plot button[data-window="21600"] {
     {% if ls_error %}<div class="flash bad" style="margin:.9rem">
       <strong>Refused — nothing was changed.</strong> {{ ls_error }}</div>{% endif %}
 
+    {# Drawn by the plot script from /api/plots/history (14 October 2026): the
+       two sensors and output 1's setpoint (dotted) in °C on the left, the
+       heater in % on the right (dashed). The same window buttons as the HV. #}
+    <div class="hv-plot" data-plot="lakeshore">
+    <div class="bar">
+      <span class="dim">last</span>
+      <button type="button" class="hv-btn" data-window="900">15 min</button>
+      <button type="button" class="hv-btn" data-window="3600">1 h</button>
+      <button type="button" class="hv-btn" data-window="21600">6 h</button>
+      <span class="legend dim" style="margin-left:auto"></span>
+    </div>
+    <canvas></canvas>
+    </div>
+
     <div class="body" style="border-top:1px solid var(--line)">
       {# The control path (§10), output 1 only.
 
@@ -191,6 +205,18 @@ body[data-hv-window="21600"] .hv-plot button[data-window="21600"] {
             onsubmit="return confirm('Close the current flow period and start a new one?\n\nNothing is erased — the period is kept in flow_periods.');">
         <button type="submit">Reset</button>
       </form>
+    </div>
+    {# The flow in g/min on the left, the running total in g on the right
+       (dashed), from /api/plots/history (14 October 2026). #}
+    <div class="hv-plot" data-plot="flow">
+    <div class="bar">
+      <span class="dim">last</span>
+      <button type="button" class="hv-btn" data-window="900">15 min</button>
+      <button type="button" class="hv-btn" data-window="3600">1 h</button>
+      <button type="button" class="hv-btn" data-window="21600">6 h</button>
+      <span class="legend dim" style="margin-left:auto"></span>
+    </div>
+    <canvas></canvas>
     </div>
     <div class="note">
       Reset closes the period into <code>flow_periods</code> and opens a new
@@ -719,9 +745,9 @@ document.addEventListener('submit', function (e) {
   function css(name) {
     return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#888';
   }
-  function niceRange(lo, hi) {
+  function niceRange(lo, hi, noZero) {
     if (!isFinite(lo) || !isFinite(hi)) { lo = 0; hi = 1; }
-    if (lo > 0) lo = 0; if (hi < 0) hi = 0;          // zero always on the axis
+    if (!noZero) { if (lo > 0) lo = 0; if (hi < 0) hi = 0; }  // zero on the axis
     if (hi - lo < 1e-9) { hi = lo + 1; }
     var span = hi - lo, step = Math.pow(10, Math.floor(Math.log10(span / 4)));
     [1, 2, 2.5, 5, 10].some(function (m) {
@@ -799,19 +825,127 @@ document.addEventListener('submit', function (e) {
       g.fillText('no readings in this window yet', W / 2, H / 2);
     }
   }
+  // THE LAKE SHORE AND FLOW PLOTS (14 October 2026), drawn like the HV ones:
+  // a left and a right axis, solid / dotted / dashed lines in the table
+  // colours. A right axis with fixed limits is given them (the heater is 0-100
+  // %); a temperature or a total is not forced to include zero.
+  var CARDS = {
+    lakeshore: {left: {unit: '°C', noZero: true}, right: {unit: '%', lo: 0, hi: 100},
+      series: [
+        {ch: 'tt401', label: 'tt401', axis: 'left', col: 0, dash: [], w: 1.8},
+        {ch: 'tt402', label: 'tt402', axis: 'left', col: 1, dash: [], w: 1.8},
+        {ch: 'ls_setpoint_1', label: 'setpoint', axis: 'left', col: 0, dash: [1, 3], w: 1.2, a: 0.7},
+        {ch: 'ls_heater_1', label: 'heater %', axis: 'right', col: 2, dash: [5, 4], w: 1.3}]},
+    flow: {left: {unit: 'g/min'}, right: {unit: 'g', noZero: true},
+      series: [
+        {ch: 'fm101', label: 'flow', axis: 'left', col: 0, dash: [], w: 1.8},
+        {ch: 'fm101_total', label: 'total', axis: 'right', col: 1, dash: [5, 4], w: 1.3}]}
+  };
+  var cardData = null;
+  function drawCard(plot, spec, d) {
+    var canvas = plot.querySelector('canvas');
+    var dpr = window.devicePixelRatio || 1;
+    var W = canvas.clientWidth, H = canvas.clientHeight;
+    if (!W || !H) return;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    var g = canvas.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, W, H);
+    var L = 52, R = 52, T = 16, B = 22, now = d.now;   // T leaves room for the unit labels
+    var t0 = now - win, x = function (t) { return L + (t - t0) / win * (W - L - R); };
+    var ext = {left: [Infinity, -Infinity], right: [Infinity, -Infinity]}, any = false;
+    spec.series.forEach(function (s) {
+      (d.series[s.ch] || []).forEach(function (p) {
+        if (p[0] < t0) return; any = true;
+        ext[s.axis][0] = Math.min(ext[s.axis][0], p[1]);
+        ext[s.axis][1] = Math.max(ext[s.axis][1], p[1]);
+      });
+    });
+    function range(side) {
+      var a = spec[side];
+      if (a.lo !== undefined) return niceRange(a.lo, a.hi, true);
+      return niceRange(ext[side][0], ext[side][1], a.noZero);
+    }
+    var rl = range('left'), rr = range('right');
+    var yl = function (v) { return T + (rl.hi - v) / (rl.hi - rl.lo) * (H - T - B); };
+    var yr = function (v) { return T + (rr.hi - v) / (rr.hi - rr.lo) * (H - T - B); };
+    var dim = css('--dim'), line = css('--line');
+    g.font = '11px system-ui, sans-serif'; g.lineWidth = 1;
+    g.fillStyle = dim; g.strokeStyle = line;
+    for (var v = rl.lo; v <= rl.hi + rl.step / 2; v += rl.step) {
+      g.beginPath(); g.moveTo(L, yl(v)); g.lineTo(W - R, yl(v)); g.stroke();
+      g.textAlign = 'right'; g.fillText(fmt(v, rl.step), L - 4, yl(v) + 4);
+    }
+    for (var u = rr.lo; u <= rr.hi + rr.step / 2; u += rr.step) {
+      g.textAlign = 'left'; g.fillText(fmt(u, rr.step), W - R + 4, yr(u) + 4);
+    }
+    g.textAlign = 'left'; g.fillText(spec.left.unit, 2, 10);       // above the plot area
+    g.textAlign = 'right'; g.fillText(spec.right.unit, W - 2, 10);
+    var stepT = win <= 900 ? 180 : win <= 3600 ? 900 : 3600;
+    g.textAlign = 'center';
+    for (var tt = Math.ceil(t0 / stepT) * stepT; tt <= now; tt += stepT) {
+      var dt = new Date(tt * 1000);
+      g.fillText(('0' + dt.getHours()).slice(-2) + ':' + ('0' + dt.getMinutes()).slice(-2),
+                 x(tt), H - 6);
+      g.beginPath(); g.moveTo(x(tt), T); g.lineTo(x(tt), H - B); g.stroke();
+    }
+    spec.series.forEach(function (s) {
+      var pts = d.series[s.ch];
+      if (!pts || !pts.length) return;
+      var y = s.axis === 'left' ? yl : yr;
+      g.save(); g.strokeStyle = COLOURS[s.col % COLOURS.length];
+      g.globalAlpha = s.a || 1; g.setLineDash(s.dash); g.lineWidth = s.w;
+      g.beginPath();
+      var prev = null;
+      pts.forEach(function (p) {
+        if (p[0] < t0) return;
+        if (prev === null || p[0] - prev > GAP_S) g.moveTo(x(p[0]), y(p[1]));
+        else g.lineTo(x(p[0]), y(p[1]));
+        prev = p[0];
+      });
+      g.stroke(); g.restore();
+    });
+    if (!any) {
+      g.fillStyle = dim; g.textAlign = 'center';
+      g.fillText('no readings in this window yet', W / 2, H / 2);
+    }
+    // The legend: a line sample in the series' colour and dash, per series.
+    var leg = plot.querySelector('.legend');
+    if (leg) leg.innerHTML = spec.series.map(function (s) {
+      var style = s.dash.length ? 'border-top:2px ' + (s.dash[0] <= 1 ? 'dotted ' : 'dashed ')
+                + COLOURS[s.col % COLOURS.length] + ';height:0;background:none'
+                : 'background:' + COLOURS[s.col % COLOURS.length];
+      return '<span style="margin-left:.6rem"><span class="swatch" style="' + style
+             + '"></span>' + s.label + '</span>';
+    }).join('');
+  }
   function drawAll() {
-    if (!last) return;
     document.body.dataset.hvWindow = String(win);
     document.querySelectorAll('.hv-plot').forEach(function (plot) {
+      if (plot.dataset.plot) {
+        if (cardData) drawCard(plot, CARDS[plot.dataset.plot], cardData);
+        return;
+      }
+      if (!last) return;
       var supply = last.supplies.filter(function (s) { return s.id === plot.dataset.supply; })[0];
       if (supply) draw(plot, supply, last.now);
     });
   }
+  var CARD_CHANNELS = [];
+  Object.keys(CARDS).forEach(function (k) {
+    CARDS[k].series.forEach(function (s) { CARD_CHANNELS.push(s.ch); });
+  });
   function fetchAll() {
-    return fetch('/api/hv/history?window=' + win, {cache: 'no-store'})
+    var hv = fetch('/api/hv/history?window=' + win, {cache: 'no-store'})
       .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (d) { if (d) { last = d; drawAll(); } })
+      .then(function (d) { if (d) last = d; })
       .catch(function () { /* keep the last picture; try again next round */ });
+    var cards = fetch('/api/plots/history?window=' + win + '&channels='
+                      + CARD_CHANNELS.join(','), {cache: 'no-store'})
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) { if (d) cardData = d; })
+      .catch(function () {});
+    return Promise.all([hv, cards]).then(drawAll);
   }
   document.addEventListener('click', function (e) {
     var b = e.target.closest && e.target.closest('.hv-plot button[data-window]');

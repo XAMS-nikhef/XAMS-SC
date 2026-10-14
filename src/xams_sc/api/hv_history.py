@@ -22,9 +22,13 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from ..model import parse_iso
-from .state import HISTORY_S, keeps_history
+from .state import HISTORY_S, PLOTTED_CHANNELS, keeps_history
 
 log = logging.getLogger(__name__)
+
+# What a line of a plotted channel contains: `"ch":"hv_...` for the HV, and
+# the channel name in quotes for the others (state.PLOTTED_CHANNELS).
+MARKS = ('"hv_',) + tuple(f'"{ch}"' for ch in sorted(PLOTTED_CHANNELS))
 
 
 def read_archive(directory: Path, since_epoch: float) -> dict[str, list[tuple[float, float]]]:
@@ -41,7 +45,9 @@ def read_archive(directory: Path, since_epoch: float) -> dict[str, list[tuple[fl
         try:
             with open(path, encoding="utf-8") as fh:
                 for line in fh:
-                    if '"hv_' not in line:
+                    # A cheap substring test before any JSON is parsed: the
+                    # HV channels and the few others the page plots.
+                    if not any(mark in line for mark in MARKS):
                         continue
                     try:
                         d = json.loads(line)

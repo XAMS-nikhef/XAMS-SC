@@ -38,9 +38,21 @@ log = logging.getLogger(__name__)
 HISTORY_S = 6 * 3600
 
 
+# The non-HV channels the Control page plots (14 October 2026): the Lake
+# Shore card (both sensors, output 1's setpoint and heater) and the Integrated
+# flow card (the rate and the running total).
+PLOTTED_CHANNELS = frozenset({
+    "tt401", "tt402", "ls_setpoint_1", "ls_heater_1",
+    "fm101", "fm101_total",
+})
+
+
 def keeps_history(channel: str) -> bool:
-    """The HV monitor and setpoint channels: what the Control page plots."""
-    return channel.startswith("hv_") and channel.endswith(("_vmon", "_imon", "_vset"))
+    """The channels the Control page plots: every HV monitor and setpoint,
+    and PLOTTED_CHANNELS."""
+    return ((channel.startswith("hv_")
+             and channel.endswith(("_vmon", "_imon", "_vset")))
+            or channel in PLOTTED_CHANNELS)
 
 
 @dataclass
