@@ -17,9 +17,14 @@
 {% set cc = channels.get('rga_control') %}
 {% set ours = ctl and ctl.us %}
 {% set scanning = acq and acq.state == 'scanning' %}
-{% set emission_on = em and em.healthy and em.value %}
+{# On/off from the service's live record (`live`: under 30 s old), the same
+   record that says "switching"; the rga_* channels are 10-s means and only
+   the fallback. #}
+{% set emission_known = live or (em and em.healthy) %}
+{% set emission_on = emis.get('on') if live else (em and em.healthy and em.value) %}
 {% set emc = channels.get('rga_em') %}
-{% set em_on = emc and emc.healthy and emc.value %}
+{% set em_known = live or (emc and emc.healthy) %}
+{% set em_on = emi.get('on') if live else (emc and emc.healthy and emc.value) %}
 
 <style>
   /* Two rows. Top: what the analyser is, and its state, side by side. Below:
@@ -97,22 +102,24 @@
   <h2>State</h2>
   <table>
     <tr><th>Emission</th>
-      <td>{% if em and em.healthy %}
-            {% if em.value %}<span class="bad">ON</span>{% else %}<span class="good">off</span>{% endif %}
+      <td>{% if emission_known %}
+            {% if emission_on %}<span class="bad">ON</span>{% else %}<span class="good">off</span>{% endif %}
           {% else %}—{% endif %}
+          {% if emis.get('pending') %}<span class="warn"> — {{ 'starting' if emis.get('wanted') == 'On' else 'stopping' }}</span>{% endif %}
           {% if emis.get('interlock') %}<span class="bad"> — interlock active</span>{% endif %}</td></tr>
     <tr><th>Electron multiplier</th>
-      <td>{% if emc and emc.healthy %}
-            {% if emc.value %}<span class="bad">ON</span>{% else %}<span class="good">off</span>{% endif %}
+      <td>{% if em_known %}
+            {% if em_on %}<span class="bad">ON</span>{% else %}<span class="good">off</span>{% endif %}
           {% else %}—{% endif %}
-          {% if emi.get('pending') %}<span class="warn"> — starting</span>{% endif %}
+          {% if emi.get('pending') %}<span class="warn"> — {{ 'starting' if emi.get('wanted') == 'On' else 'stopping' }}</span>{% endif %}
           {% if emi.get('interlock') %}<span class="bad"> — interlock active</span>{% endif %}
           {% if emi.get('voltage_v') is not none %}<span class="dim">({{ emi.get('voltage_v') }} V, gain {{ emi.get('gain') }}{% if emi.get('equiv_ion') %}, values as ion current{% endif %})</span>
           {% if not emi.get('gain_calibrated') %}<span class="warn">gain not calibrated: EM values are relative</span>{% endif %}{% endif %}</td></tr>
     <tr><th>Control</th>
-      <td>{% if cc and cc.healthy %}
-            {% if cc.value == 0 %}nobody — free
-            {% elif cc.value == 1 %}<span class="good">this system</span>
+      {% set cv = (1 if ctl.us else 2 if ctl.controlled else 0) if (live and ctl) else (cc.value if cc and cc.healthy else none) %}
+      <td>{% if cv is not none %}
+            {% if cv == 0 %}nobody — free
+            {% elif cv == 1 %}<span class="good">this system</span>
             {% else %}<span class="warn">another client</span>{% endif %}
             {% if ctl and ctl.controlled and not ctl.us %}
               <span class="dim">— {{ ctl.client or 'no name' }}{% if ctl.ip %} from {{ ctl.ip }}{% endif %}{% if ctl.locked %}, locked{% endif %}</span>
@@ -213,8 +220,8 @@
     {% endif %}
   </div>
   <div style="font-size:.85em;margin-top:.3rem">now: emission
-    {% if em and em.healthy %}{% if emission_on %}<span class="bad">ON</span>{% else %}<span class="good">off</span>{% endif %}{% else %}<span class="dim">unknown</span>{% endif %},
-    EM {% if emc and emc.healthy %}{% if em_on %}<span class="bad">ON</span>{% else %}<span class="good">off</span>{% endif %}{% else %}<span class="dim">unknown</span>{% endif %}
+    {% if emission_known %}{% if emission_on %}<span class="bad">ON</span>{% else %}<span class="good">off</span>{% endif %}{% else %}<span class="dim">unknown</span>{% endif %},
+    EM {% if em_known %}{% if em_on %}<span class="bad">ON</span>{% else %}<span class="good">off</span>{% endif %}{% else %}<span class="dim">unknown</span>{% endif %}
   </div>
   {% if ours %}
   <div class="dim" style="font-size:.85em">
