@@ -733,13 +733,21 @@ class TestSwitchingIsShownUntilItIsDone:
         payloads = service.bus.published_on(TOPIC_HV_SWITCHING + "/hv_nai_vset")
         return json.loads(payloads[-1]) if payloads and payloads[-1] else None
 
-    def test_turning_off_is_switching_until_bit_0_clears(self, service):
+    def vmon(self, volts):
+        return Measurement(t=utcnow(), channel="hv_nai_vmon", value=volts,
+                           unit="V", raw=abs(volts), quality=Quality.OK)
+
+    def test_turning_off_is_switching_until_off_and_at_zero(self, service):
+        """14 October 2026, nai at +100 V: STAT went to 0 at 13:23:23.5 with
+        VMON still 13.5 V two seconds later."""
         assert energise(service, on=False)["ok"]
         assert self.switching(service)["wanted"] == "off"
-        service._accumulate([stat_sample(ON_RAMPING_DOWN)])
-        service._accumulate([stat_sample(1 << BIT_ON)])     # ramp over, still ON
+        service._accumulate([stat_sample(ON_RAMPING_DOWN), self.vmon(80.0)])
+        service._accumulate([stat_sample(1 << BIT_ON), self.vmon(40.0)])  # ramp over, ON
         assert self.switching(service) is not None
-        service._accumulate([stat_sample(0)])
+        service._accumulate([stat_sample(0), self.vmon(13.5)])  # off, volts still there
+        assert self.switching(service) is not None
+        service._accumulate([stat_sample(0), self.vmon(0.4)])
         assert self.switching(service) is None
 
     def test_it_is_given_up_after_the_ramp_time_and_a_margin(self, service):

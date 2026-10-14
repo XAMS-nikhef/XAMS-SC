@@ -94,6 +94,10 @@ from ..hv_status import (  # noqa: F401
 # page stops saying so and the log says the board did not follow.
 SWITCH_OFF_MARGIN_S = 60.0
 SWITCH_OFF_DEFAULT_S = 300.0      # no ramp rate known
+# ...and it is OFF only once VMON is below this too. The board clears bit 0
+# while the output is still coming down: nai at +100 V, 14 October 2026, STAT
+# 0x0000 at 13:23:23.5 with VMON still 13.5 V (10-s mean) at 25.5.
+SWITCHED_OFF_BELOW_V = 1.0
 
 # A setpoint that reads back further than this from what was asked means the
 # write did not take. 0.5 V is far below anything that matters on a kilovolt
@@ -497,6 +501,13 @@ class CaenService(BaseService):
         self._stat_last: dict[str, float] = {}
         self._switching: dict[str, dict] = {}
         self._vset_for_stat: dict[str, object] = {}
+        self._vmon_last: dict[str, float] = {}     # by hv_vset name, every read
+        self._vset_for_vmon: dict[str, str] = {}
+        for vmon in (c for c in self._channels if c.kind == "hv_vmon"):
+            for ch in self._channels:
+                if (ch.kind == "hv_vset" and ch.device == vmon.device
+                        and int(ch.phys) == int(vmon.phys)):
+                    self._vset_for_vmon[vmon.name] = ch.name
         for stat in (c for c in self._channels if c.kind == "hv_stat"):
             for ch in self._channels:
                 if (ch.kind == "hv_vset" and ch.device == stat.device
@@ -1009,7 +1020,8 @@ class CaenService(BaseService):
            window. It is a bitmask, published as its last value anyway, so
            this adds rows only where something happened.
         3. A channel switched off stops being "switching" when its output is
-           off, or when it has had its ramp time plus a margin.
+           off AND its VMON is below SWITCHED_OFF_BELOW_V, or when it has had
+           its ramp time plus a margin.
         """
         kept = []
         for m in batch:
@@ -1017,27 +1029,33 @@ class CaenService(BaseService):
             if since is not None and m.t < since:
                 continue
             kept.append(m)
-            if m.channel not in self._vset_for_stat:
-                continue
-            if m.quality == Quality.OK and m.value is not None:
+            good = m.quality == Quality.OK and m.value is not None
+            if good and m.channel in self._vset_for_vmon:
+                self._vmon_last[self._vset_for_vmon[m.channel]] = m.value
+            if good and m.channel in self._vset_for_stat:
                 if m.value != self._stat_last.get(m.channel):
                     self._stat_last[m.channel] = m.value
                     self.bus.publish_measurement(m)
-                self._check_switching(self._vset_for_stat[m.channel], int(m.value))
+        for name in list(self._switching):
+            self._check_switching(name)
         super()._accumulate(kept)
 
-    def _check_switching(self, vset_channel, word: int) -> None:
-        record = self._switching.get(vset_channel.name)
+    def _check_switching(self, name: str) -> None:
+        record = self._switching.get(name)
         if record is None:
             return
-        if not is_energised(word):
-            self._set_switching(vset_channel.name, None)
+        stat = next((s for s, v in self._vset_for_stat.items() if v.name == name), None)
+        word = self._stat_last.get(stat) if stat else None
+        vmon = self._vmon_last.get(name)
+        if (word is not None and not is_energised(int(word)) and vmon is not None
+                and abs(vmon) < SWITCHED_OFF_BELOW_V):
+            self._set_switching(name, None)
         elif time.monotonic() > record["_until"]:
-            log.warning("%s: turned off at %s but still reports ON (status %d) "
+            log.warning("%s: turned off at %s but not yet off (status %s, VMON %s V) "
                         "after its ramp time and %.0f s; no longer shown as "
-                        "switching", vset_channel.name, record["since"], word,
+                        "switching", name, record["since"], word, vmon,
                         SWITCH_OFF_MARGIN_S)
-            self._set_switching(vset_channel.name, None)
+            self._set_switching(name, None)
 
     def _set_switching(self, name: str, record: dict | None) -> None:
         """Remember (or forget) a channel on its way off, and tell the page."""

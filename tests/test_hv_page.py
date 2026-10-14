@@ -408,6 +408,15 @@ class TestMovingChannels:
                             lambda self, ch: {"wanted": "off", "since": "t"})
         assert page(stat_word=1, vmon=-0.5) == ["switching off…"] * 8
 
+    def test_off_with_volts_still_on_it_is_switching_off(self, page, page_html):
+        """The board clears bit 0 before the output is down (14 October 2026)."""
+        assert page(stat_word=0, vmon=13.5) == ["switching off…"] * 8
+        html = page_html(stat_word=0, vmon=13.5, vset=100.0)
+        assert ">turn ON<" not in html and 'data-moving="yes"' in html
+
+    def test_off_at_zero_offers_turn_on_again(self, page):
+        assert page(stat_word=0, vmon=0.3) == ["enabled"] * 8
+
     def test_a_still_page_refreshes_slowly(self, page_html):
         assert 'data-moving=""' in page_html(stat_word=1, vmon=-800.0, vset=-800.0)
 
