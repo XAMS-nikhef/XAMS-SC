@@ -57,7 +57,7 @@ from ..config import (ConfigError, load, read_hv_defaults,
                       validate_recipients, write_hv_defaults,
                       write_recipients)
 from ..hv_status import (ARMED_ABOVE_V, describe_status, is_disabled,
-                         is_energised, is_tripped, status_faults)
+                         is_energised, is_tripped, ramping, status_faults)
 from ..grafana import DriftWatcher, base_url as grafana_base_url
 from .logview import (ROTATIONS, colourise, log_files, newest_first,
                       rotated)
@@ -1011,6 +1011,11 @@ def create_app(broker: str = "127.0.0.1", port: int = 1883, *,
                     # offered nothing (caen.py, `_watch_trips`).
                     "trip": state.hv_trip(vset_name),
                     "hw_tripped": word is not None and is_tripped(word),
+                    # Moving: the board's ramp bits, and a turn-off the CAEN
+                    # service is still waiting to see complete (bit 0 stays
+                    # set through the ramp down and some seconds after).
+                    "ramping": None if word is None else ramping(word),
+                    "switching": state.hv_switching(vset_name),
                 })
             supplies.append({
                 "trips": [c for c in channels if c.get("trip")],
@@ -1025,7 +1030,9 @@ def create_app(broker: str = "127.0.0.1", port: int = 1883, *,
         # change something", which is the question asked before navigating.
         # They were on the overview only because they had nowhere else.
         q = request.query_params
-        return page(request, "hv.html", supplies=supplies,
+        moving = any(c["ramping"] or c["switching"]
+                     for s in supplies for c in s["channels"])
+        return page(request, "hv.html", supplies=supplies, moving=moving,
                     hv_ok=q.get("hv_ok"), hv_error=q.get("hv_error"),
                     lakeshore=lakeshore_view(), flow=state.flow_total(),
                     ls_ok=q.get("ls_ok"), ls_error=q.get("ls_error"),

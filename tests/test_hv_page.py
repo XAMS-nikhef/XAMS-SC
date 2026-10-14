@@ -381,3 +381,36 @@ class TestATripTheBoardNeverFlagged:
 
         assert "TRIPPED" not in html
         assert 'form="clr-' not in html
+
+
+class TestMovingChannels:
+    """14 October 2026: a channel on its way off showed "ON" with "turn off"
+    offered again for its whole ramp down; on its way up it showed "ON"."""
+
+    def test_ramping_down_is_switching_off_and_offers_nothing(self, page, page_html):
+        word = (1 << 0) | (1 << 2)
+        assert page(stat_word=word, vmon=-400.0) == ["switching off…"] * 8
+        html = page_html(stat_word=word, vmon=-400.0, vset=-800.0)
+        assert ">turn off<" not in html and "switching off…</button>" in html
+        assert 'data-moving="yes"' in html
+
+    def test_ramping_up_says_so_and_offers_turn_off_as_an_abort(self, page, page_html):
+        word = (1 << 0) | (1 << 1)
+        assert page(stat_word=word, vmon=-400.0) == ["ramping up…"] * 8
+        html = page_html(stat_word=word, vmon=-400.0, vset=-800.0)
+        assert ">turn off<" in html and "Stop the ramp and turn OFF" in html
+
+    def test_a_turn_off_still_waiting_for_bit_0_is_switching_off(self, monkeypatch, page):
+        """Bit 0 stays set some seconds after the ramp (29 September 2026):
+        the CAEN service's record covers that."""
+        from xams_sc.api import state as state_module
+        monkeypatch.setattr(state_module.SystemState, "hv_switching",
+                            lambda self, ch: {"wanted": "off", "since": "t"})
+        assert page(stat_word=1, vmon=-0.5) == ["switching off…"] * 8
+
+    def test_a_still_page_refreshes_slowly(self, page_html):
+        assert 'data-moving=""' in page_html(stat_word=1, vmon=-800.0, vset=-800.0)
+
+    def test_the_page_no_longer_reloads_itself_whole(self, page_html):
+        html = page_html(stat_word=1, vmon=-800.0, vset=-800.0)
+        assert "location.reload" not in html and "DOMParser" in html

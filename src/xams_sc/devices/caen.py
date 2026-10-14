@@ -59,8 +59,8 @@ import time
 import serial
 
 from ..bus import (ACK_HV_CLEAR, ACK_HV_OUTPUT, ACK_HV_VSET, TOPIC_AUDIT,
-                   TOPIC_HV_CLEAR, TOPIC_HV_OUTPUT, TOPIC_HV_TRIP,
-                   TOPIC_HV_VSET)
+                   TOPIC_HV_CLEAR, TOPIC_HV_OUTPUT, TOPIC_HV_SWITCHING,
+                   TOPIC_HV_TRIP, TOPIC_HV_VSET)
 from ..config import Config
 from ..model import Measurement, Quality, iso, utcnow
 from ..scaling import apply_sign, magnitude_for
@@ -87,6 +87,13 @@ from ..hv_status import (  # noqa: F401
     ARMED_ABOVE_V, BIT_DISABLED, BIT_ON, BIT_TRIP, COLLAPSE_CONFIRM_READS,
     FAULT_BITS, FLAG_CONFIRM_READS, STAT_BITS, describe_status, is_disabled,
     is_energised, is_tripped, output_collapsed, output_healthy, status_faults)
+
+# How long a channel switched off is shown as "switching off" at most, beyond
+# its ramp-down time at the configured rate (`expect.rdw`, V/s): STAT bit 0
+# stayed set some seconds after the ramp on 29 September 2026. Past it the
+# page stops saying so and the log says the board did not follow.
+SWITCH_OFF_MARGIN_S = 60.0
+SWITCH_OFF_DEFAULT_S = 300.0      # no ramp rate known
 
 # A setpoint that reads back further than this from what was asked means the
 # write did not take. 0.5 V is far below anything that matters on a kilovolt
@@ -475,6 +482,26 @@ class CaenService(BaseService):
         # drops the USB link, so a relink after a trip is how a clear can
         # tell whether the supply was power-cycled in between.
         self._relinked_at: dict[str, float] = {}
+
+        # SWITCHING (14 October 2026, docs/operating/webui.md "Control"):
+        #   _commanded_at  when a command last published a channel's state out
+        #                  of cadence (STAT or VSET). A poll sample taken
+        #                  before that is older than what was published and is
+        #                  dropped, so the next 10-s publish cannot put the
+        #                  pre-command state back on the page.
+        #   _stat_last     the STAT value last published, so a change is
+        #                  published at once rather than at the next 10 s.
+        #   _switching     channels turned off and not yet off, by hv_vset
+        #                  name: {"wanted", "since", "_until"}.
+        self._commanded_at: dict[str, object] = {}
+        self._stat_last: dict[str, float] = {}
+        self._switching: dict[str, dict] = {}
+        self._vset_for_stat: dict[str, object] = {}
+        for stat in (c for c in self._channels if c.kind == "hv_stat"):
+            for ch in self._channels:
+                if (ch.kind == "hv_vset" and ch.device == stat.device
+                        and int(ch.phys) == int(stat.phys)):
+                    self._vset_for_stat[stat.name] = ch
 
     def owned_channels(self):
         """Both supplies' channels, by device id rather than service name.
@@ -932,7 +959,9 @@ class CaenService(BaseService):
         stat = self._stat_channel_for(channel)
         if stat is None:
             return
+        self._commanded_at[stat.name] = utcnow()
         self._window.pop(stat.name, None)
+        self._stat_last[stat.name] = float(word)
         self.bus.publish_measurement(
             Measurement(t=utcnow(), channel=stat.name, value=float(word),
                         unit=stat.unit, raw=float(word), quality=Quality.OK))
@@ -961,10 +990,74 @@ class CaenService(BaseService):
         transaction and checked against what was asked (VSET_TOLERANCE_V), or
         this is not reached.
         """
+        self._commanded_at[channel.name] = utcnow()
         self._window.pop(channel.name, None)
         self.bus.publish_measurement(
             Measurement(t=utcnow(), channel=channel.name, value=value,
                         unit=channel.unit, raw=magnitude, quality=Quality.OK))
+
+    # ------------------------------------------------------------ switching
+
+    def _accumulate(self, batch: list[Measurement]) -> None:
+        """The poll's samples, with three things added for switching.
+
+        1. A sample taken before a command published this channel's state is
+           dropped. The poll runs on its own thread: a sweep that started
+           before the command can finish after it, and its old STAT would be
+           the last word in the window the command had just cleared.
+        2. A STAT that changed is published at once, not at the next 10-s
+           window. It is a bitmask, published as its last value anyway, so
+           this adds rows only where something happened.
+        3. A channel switched off stops being "switching" when its output is
+           off, or when it has had its ramp time plus a margin.
+        """
+        kept = []
+        for m in batch:
+            since = self._commanded_at.get(m.channel)
+            if since is not None and m.t < since:
+                continue
+            kept.append(m)
+            if m.channel not in self._vset_for_stat:
+                continue
+            if m.quality == Quality.OK and m.value is not None:
+                if m.value != self._stat_last.get(m.channel):
+                    self._stat_last[m.channel] = m.value
+                    self.bus.publish_measurement(m)
+                self._check_switching(self._vset_for_stat[m.channel], int(m.value))
+        super()._accumulate(kept)
+
+    def _check_switching(self, vset_channel, word: int) -> None:
+        record = self._switching.get(vset_channel.name)
+        if record is None:
+            return
+        if not is_energised(word):
+            self._set_switching(vset_channel.name, None)
+        elif time.monotonic() > record["_until"]:
+            log.warning("%s: turned off at %s but still reports ON (status %d) "
+                        "after its ramp time and %.0f s; no longer shown as "
+                        "switching", vset_channel.name, record["since"], word,
+                        SWITCH_OFF_MARGIN_S)
+            self._set_switching(vset_channel.name, None)
+
+    def _set_switching(self, name: str, record: dict | None) -> None:
+        """Remember (or forget) a channel on its way off, and tell the page."""
+        if record is None:
+            if self._switching.pop(name, None) is None:
+                return
+            payload = ""
+        else:
+            self._switching[name] = record
+            payload = json.dumps({k: v for k, v in record.items()
+                                  if not k.startswith("_")}, separators=(",", ":"))
+        self.bus.publish_raw("%s/%s" % (TOPIC_HV_SWITCHING, name), payload, retain=True)
+
+    def _off_wait_s(self, channel, volts: float | None) -> float:
+        """Ramp-down time at the configured rate, plus the margin."""
+        spec = next((s for s in self._specs if s["id"] == channel.device), {})
+        rate = ((spec.get("expect") or {}).get(int(channel.phys)) or {}).get("rdw")
+        if not rate or volts is None:
+            return SWITCH_OFF_DEFAULT_S
+        return abs(volts) / float(rate) + SWITCH_OFF_MARGIN_S
 
     # ------------------------------------------- the invariant, enforced
     #
@@ -1447,6 +1540,13 @@ class CaenService(BaseService):
         # command has just made obsolete.
         if after is not None:
             self._publish_status_now(channel, after)
+        # On its way off: shown as switching until STAT bit 0 clears.
+        if not wanted_on and now_on:
+            self._set_switching(name, {
+                "wanted": "off", "since": iso(utcnow()),
+                "_until": time.monotonic() + self._off_wait_s(channel, vset)})
+        elif wanted_on:
+            self._set_switching(name, None)
         self.bus.publish_raw(ACK_HV_OUTPUT, json.dumps(
             {"ok": True, "channel": name, "on": wanted_on, "vset": vset,
              "detail": detail, "by": actor}, separators=(",", ":")))
@@ -1651,6 +1751,13 @@ class CaenService(BaseService):
         self.bus.subscribe(TOPIC_HV_OUTPUT, self._handle_output)
         self.bus.subscribe(TOPIC_HV_CLEAR, self._handle_clear)
         self.bus.subscribe("%s/+" % TOPIC_HV_TRIP, self._on_trip_record)
+        # A "switching off" left retained by a previous run is not known to
+        # be true any more: clear it. A channel still ramping shows that from
+        # its own STAT bits.
+        for ch in self._channels:
+            if ch.kind == "hv_vset":
+                self.bus.publish_raw("%s/%s" % (TOPIC_HV_SWITCHING, ch.name), "",
+                                     retain=True)
         return super().run()
 
     def _relink(self, force: bool = False) -> bool:

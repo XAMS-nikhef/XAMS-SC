@@ -634,6 +634,24 @@ acquisition is saved once. Reading a file back for analysis:
 **Saved measurements**, under the spectrum: the ten newest files, each a
 download link.
 
+### While a channel moves (14 October 2026)
+
+Turning a channel **off** starts a ramp down, and the board keeps the output
+bit set through it and for some seconds after. Turning it **on** is "on" at
+once and ramps up after. The page now says where a channel is going:
+
+- **switching off…** from the accepted turn-off until the board reports the
+  output off (at most its ramp time at the configured rate plus 60 s), with
+  no button to press meanwhile;
+- **ramping up…** while it ramps up; *turn off* stays available, as the way
+  to stop a ramp, and its confirmation says so.
+
+The CAEN service publishes a status word the moment it changes (not only
+every 10 s), and drops a poll reading taken before a command so the old state
+cannot come back after it. The page itself no longer reloads: it swaps in
+what changed every 10 s, every 2 s while anything moves, and keeps whatever
+was typed, loaded or chosen and not yet sent.
+
 ## System health
 
 The question it answers is *is the software all right*, and it is built so that

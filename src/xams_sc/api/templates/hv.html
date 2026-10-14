@@ -1,11 +1,17 @@
 {% extends "base.html" %}
 {% block title %}Control{% endblock %}
+{# No whole-page reload: the script at the bottom swaps the parts that change
+   in place, every 10 s - every 2 s while a channel is ramping or switching -
+   and keeps whatever was typed or loaded and not yet sent (14 October 2026).
+   Without JavaScript, the plain refresh. #}
+{% block refresh %}<noscript><meta http-equiv="refresh" content="10"></noscript>{% endblock %}
 {% block content %}
 <style>
 /* Two small cards side by side. Stacked, they pushed the high voltage below
    the fold on a laptop, and neither is wide enough to need a full row. One
    column again when the window is too narrow to hold both without squeezing
    — the same rule the P&ID column follows. */
+.hv-btn.working { color:var(--warn); border-color:var(--warn); cursor:progress; }
 .control-pair { display:grid; gap:1.2rem; align-items:stretch;
                 grid-template-columns:repeat(2, minmax(0,1fr)); }
 @media (max-width:900px) { .control-pair { grid-template-columns:minmax(0,1fr); } }
@@ -337,6 +343,14 @@
           <span class="dot bad"></span><span class="bad">{{ c.faults|join(', ') }}</span>
         {% elif c.energised is none %}
           <span class="dot bad"></span><span class="bad">no reading</span>
+        {# MOVING. Turning off ramps down with bit 0 still set, and bit 0
+           stays a few seconds after; turning on is "on" at once and ramps
+           up after. Until the board has got there the row says where it is
+           going, not where it was (14 October 2026). #}
+        {% elif c.switching or c.ramping == 'down' %}
+          <span class="dot warn"></span><span class="warn">switching off…</span>
+        {% elif c.ramping == 'up' %}
+          <span class="dot good"></span><span class="good">ramping up…</span>
         {% elif c.energised %}
           {% if c.vmon and c.vmon.healthy and c.vmon.value is not none
                 and c.vmon.value|abs > 1 %}
@@ -366,7 +380,12 @@
                   class="hv-btn off"
                   title="zero the setpoint, switch it off and clear the board's alarm. The channel stays off at 0 V."
           >clear trip</button>
+        {% elif c.switching or c.ramping == 'down' %}
+          {# On its way off: nothing to press until it is there. #}
+          <button type="button" class="hv-btn working" disabled>switching off…</button>
         {% elif c.energised is not none and not c.switched_off %}
+          {# While ramping up, "turn off" stays: it is how a ramp is stopped,
+             and its confirmation says so. #}
           <button type="submit" form="out-{{ c.vset_channel }}"
                   class="hv-btn {{ 'off' if c.energised else 'on' }}"
                   title="{{ 'de-energise this channel' if c.energised else 'energise; it will ramp to its setpoint' }}"
@@ -416,6 +435,7 @@
 
 {# Outside the setpoint form: one tiny form per channel, so energising is a
    separate act from applying a voltage. #}
+<div id="hv-forms" data-moving="{{ 'yes' if moving else '' }}">
 {% for s in supplies %}{% for c in s.channels %}
 <form method="post" action="/hv/output" id="out-{{ c.vset_channel }}"
       {# Two things had to be right here and neither was, so the most
@@ -430,7 +450,9 @@
          TIGHTER than the inline `if` in Jinja - without the outer brackets
          the quoting applied to the else-branch alone and the turn-OFF text
          went out bare, as confirm(Turn OFF pmt1?). #}
-      onsubmit='return confirm({{ (("Turn OFF " ~ c.label ~ "?")
+      onsubmit='return confirm({{ (("Stop the ramp and turn OFF " ~ c.label ~ "?\n\nIt is still ramping up; it will ramp down from where it is.")
+         if c.ramping == "up"
+         else ("Turn OFF " ~ c.label ~ "?")
          if c.energised
          else ("Energise " ~ c.label ~ "?\n\nIt will ramp to its loaded setpoint.")) | tojson }});'>
   <input type="hidden" name="channel" value="{{ c.vset_channel }}">
@@ -449,6 +471,7 @@
   <input type="hidden" name="channel" value="{{ c.vset_channel }}">
 </form>
 {% endfor %}{% endfor %}
+</div>
 
 <script>
 // Fills the boxes from channels.yaml. Writes nothing: section 10a wants the
@@ -562,6 +585,76 @@ document.addEventListener('submit', function (e) {
   btn.disabled = true;
   btn.textContent = 'switching…';
 });
+
+// IN-PLACE REFRESH (14 October 2026), as on the RGA page. The parts that
+// change are fetched and swapped in; a part with the cursor in it is left
+// alone, and in the others whatever was typed, loaded or ticked and not yet
+// sent is put back - the rule the whole-page reload used to keep by not
+// reloading at all. Every 10 s; every 2 s while a channel is ramping or
+// switching, so its button comes back the moment the board has got there.
+// Paused from a submit until the answer replaces the page.
+(function () {
+  var LIVE = ['cryostat', 'flow', 'setpoints', 'hv-forms'];
+  var busy = false;
+  document.addEventListener('submit', function (e) {
+    if (!e.defaultPrevented) busy = true;
+  });
+  window.addEventListener('pageshow', function (e) {
+    if (e.persisted) { busy = false; refresh(true); }
+  });
+  function defaultIndex(sel) {
+    for (var i = 0; i < sel.options.length; i++) {
+      if (sel.options[i].defaultSelected) return i;
+    }
+    return sel.multiple ? -1 : 0;
+  }
+  function keyOf(el) {
+    return (el.form ? el.form.getAttribute('action') : '') + '|' + el.name;
+  }
+  function fields(root) {
+    return root.querySelectorAll('input[name]:not([type=hidden]), select[name], textarea[name]');
+  }
+  function refresh(force) {
+    if (busy) return Promise.resolve();
+    return fetch(location.pathname, {cache: 'no-store'}).then(function (r) {
+      return r.ok ? r.text() : null;
+    }).then(function (html) {
+      if (!html || busy) return;
+      var doc = new DOMParser().parseFromString(html, 'text/html');
+      LIVE.forEach(function (id) {
+        var old = document.getElementById(id), neu = doc.getElementById(id);
+        if (!old || !neu) return;
+        if ('moving' in neu.dataset) old.dataset.moving = neu.dataset.moving;
+        if (!force && old.innerHTML === neu.innerHTML) return;
+        if (old.contains(document.activeElement)) return;
+        var kept = {};
+        fields(old).forEach(function (el) {
+          // Only what differs from what the server sent: a box nobody
+          // touched takes the new server value. For a select the rule of
+          // base.html (defaultIndex): no option marked selected means the
+          // first is what the server sent.
+          var changed = el.type === 'checkbox' ? el.checked !== el.defaultChecked
+                      : el.tagName === 'SELECT' ? el.selectedIndex !== defaultIndex(el)
+                      : el.value !== el.defaultValue;
+          if (changed) kept[keyOf(el)] = el.type === 'checkbox' ? el.checked : el.value;
+        });
+        old.innerHTML = neu.innerHTML;
+        // An element with form="..." outside its form is found by keyOf only
+        // once it is in the document, which it now is.
+        fields(old).forEach(function (el) {
+          var k = keyOf(el);
+          if (!(k in kept)) return;
+          if (el.type === 'checkbox') el.checked = kept[k]; else el.value = kept[k];
+        });
+      });
+    }).catch(function () { /* keep what is shown; the next round tries again */ });
+  }
+  (function loop() {
+    var f = document.getElementById('hv-forms');
+    var fast = f && f.dataset.moving === 'yes';
+    setTimeout(function () { refresh().then(loop); }, fast ? 2000 : 10000);
+  })();
+})();
 </script>
 
 <div class="card">
