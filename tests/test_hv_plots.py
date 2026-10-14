@@ -88,22 +88,30 @@ def test_archive_reader_takes_hv_lines_only(tmp_path):
     assert [v for _, v in points["hv_gate_vmon"]] == [-1200.0]
 
 
-def test_history_endpoint_per_supply_without_the_nai_current(app):
+def test_history_endpoint_lists_the_whole_supply_without_disabled_channels(app):
+    """hv_2 since 14 October 2026: cathode, spare, anode, gate - every channel
+    with its current, and the disabled NaI (same index as the gate) absent."""
     state = app.state.system
     now = time.time()
-    for ch, v in (("hv_nai_vmon", 800.0), ("hv_nai_imon", 150.0),
-                  ("hv_cathode_vmon", -1700.0), ("hv_cathode_imon", 0.3)):
+    for ch, v in (("hv_gate_vmon", 303.0), ("hv_gate_imon", 0.01),
+                  ("hv_cathode_vmon", -215.0), ("hv_cathode_imon", 0.3)):
         state._on_measurement("m", payload(ch, v, now - 5))
     r = ui_client(app).get("/api/hv/history?window=900")
     assert r.status_code == 200
     d = r.json()
     hv2 = next(s for s in d["supplies"] if s["id"] == "hv_2")
+    assert [(c["index"], c["label"]) for c in hv2["channels"]] == [
+        (0, "cathode"), (1, "spare"), (2, "anode"), (3, "gate")]
     by = {c["label"]: c for c in hv2["channels"]}
-    assert [p[1] for p in by["cathode"]["v"]] == [-1700.0]
-    assert [p[1] for p in by["cathode"]["i"]] == [0.3]
-    assert [p[1] for p in by["nai"]["v"]] == [800.0]
-    assert by["nai"]["i"] is None
-    assert [c["index"] for c in hv2["channels"]] == sorted(c["index"] for c in hv2["channels"])
+    assert [p[1] for p in by["cathode"]["v"]] == [-215.0]
+    assert [p[1] for p in by["gate"]["v"]] == [303.0]
+    assert [p[1] for p in by["gate"]["i"]] == [0.01]
+
+
+def test_the_hv_page_shows_the_spare_and_not_the_disabled_nai(app):
+    html = ui_client(app).get("/hv").text
+    assert "not used (spare)" in html
+    assert "hv_nai_vset" not in html  # no row, no form field for the disabled NaI
 
 
 def test_window_is_clamped(app):

@@ -936,7 +936,10 @@ def create_app(broker: str = "127.0.0.1", port: int = 1883, *,
             no_imon = set(spec.get("plot_without_imon") or [])
             rows = []
             for ch in state.config.channels.values():
-                if ch.device != spec["id"] or ch.kind != "hv_vmon":
+                # A disabled channel is not read, so it has nothing to plot -
+                # and on 14 October 2026 the disabled NaI shared index 3 with
+                # the gate that had moved onto its channel.
+                if ch.device != spec["id"] or ch.kind != "hv_vmon" or not ch.enabled:
                     continue
                 index = int(ch.phys)
                 rows.append((index, ch.name, index not in no_imon))
@@ -962,7 +965,10 @@ def create_app(broker: str = "127.0.0.1", port: int = 1883, *,
         for spec in state.config.devices.get("caen", []) or []:
             channels = []
             for ch in state.config.channels.values():
-                if ch.device != spec["id"] or ch.kind != "hv_vmon":
+                # Disabled channels are not on the page: they are not read,
+                # and a disabled one can share its index with the channel
+                # that replaced it (the NaI and the gate, 14 October 2026).
+                if ch.device != spec["id"] or ch.kind != "hv_vmon" or not ch.enabled:
                     continue
                 index = int(ch.phys)
                 imon_name = ch.name.replace("_vmon", "_imon")
