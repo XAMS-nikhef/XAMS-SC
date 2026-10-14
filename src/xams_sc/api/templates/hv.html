@@ -6,6 +6,9 @@
    Without JavaScript, the plain refresh. #}
 {% block refresh %}<noscript><meta http-equiv="refresh" content="10"></noscript>{% endblock %}
 {% block content %}
+{# One colour per channel index, the same in the table and the plot. Not the
+   status colours (green / amber / red): those mean something else here. #}
+{% set hv_colours = ['#58a6ff', '#f778ba', '#56d4dd', '#c297ff'] %}
 <style>
 /* Two small cards side by side. Stacked, they pushed the high voltage below
    the fold on a laptop, and neither is wide enough to need a full row. One
@@ -22,6 +25,27 @@
    height rather than only the width. Content stays at the top of each. */
 .control-pair > div { display:flex; }
 .control-pair > div > .card { margin:0; flex:1; }
+/* THE PLOT BESIDE THE TABLE (14 October 2026): what each supply's channels
+   did over the last minutes to hours, next to what they read now. Below the
+   table when the window is too narrow to give both room. */
+.hv-split { display:grid; gap:1rem; align-items:start;
+            grid-template-columns:minmax(0,1fr) minmax(330px,34%); }
+@media (max-width:1500px) { .hv-split { grid-template-columns:minmax(0,1fr); } }
+.hv-plot { padding:.4rem .9rem .8rem .9rem; }
+.hv-plot canvas { width:100%; height:230px; display:block; }
+.hv-plot .bar { display:flex; gap:.4rem; align-items:center; font-size:.8rem;
+                margin-bottom:.3rem; flex-wrap:wrap; }
+.hv-plot .bar button { padding:.1rem .5rem; font-size:.78rem; }
+/* The chosen window is marked from <body data-hv-window>, not by a class on
+   the button: the buttons sit inside the swapped setpoint form, and a class
+   added here would make it differ from the server's copy and be swapped (and
+   redrawn) on every refresh. */
+body[data-hv-window="900"] .hv-plot button[data-window="900"],
+body[data-hv-window="3600"] .hv-plot button[data-window="3600"],
+body[data-hv-window="21600"] .hv-plot button[data-window="21600"] {
+  border-color:var(--text); color:var(--text); }
+.swatch { display:inline-block; width:.75rem; height:.22rem; border-radius:1px;
+          vertical-align:middle; margin-right:.35rem; }
 </style>
 
 {# THE CONTROL PAGE. Everything in this system that writes to an instrument or
@@ -242,6 +266,8 @@
   <h2>{{ s.id }} — {{ s.model }} serial {{ s.serial }}
       <span class="dim" style="text-transform:none;letter-spacing:0">
         (firmware {{ s.firmware }})</span></h2>
+  <div class="hv-split">
+  <div>
   <table class="channels">
     {# Identical in both tables, so the columns line up across the two
        supplies now that they sit next to each other. #}
@@ -270,7 +296,7 @@
     {% for c in s.channels %}
     <tr>
       <td class="dim">{{ c.index }}</td>
-      <td>{{ c.label }}<span class="dim"> — {{ c.description }}</span></td>
+      <td><span class="swatch" style="background:{{ hv_colours[c.index % 4] }}"></span>{{ c.label }}<span class="dim"> — {{ c.description }}</span></td>
       {# The setpoint beside the monitor: "what it was told" next to "what it
          is doing". A non-zero setpoint on a DISABLED channel is exactly what
          §10a exists to stop, so it is marked here rather than left to be
@@ -403,6 +429,21 @@
     </tr>
     {% endfor %}
   </table>
+  </div>
+  {# Drawn by the script at the bottom from /api/hv/history. The buttons are
+     type="button": they sit inside the setpoint form and must never submit it. #}
+  <div class="hv-plot" data-supply="{{ s.id }}">
+    <div class="bar">
+      <span class="dim">last</span>
+      <button type="button" class="hv-btn" data-window="900">15 min</button>
+      <button type="button" class="hv-btn" data-window="3600">1 h</button>
+      <button type="button" class="hv-btn" data-window="21600">6 h</button>
+      <span class="dim" style="margin-left:auto">— V &nbsp;- - µA &nbsp;··· set ·
+        longer: <a href="{{ grafana_url }}" target="_blank">Grafana</a></span>
+    </div>
+    <canvas aria-label="voltage and current of {{ s.id }} over time"></canvas>
+  </div>
+  </div>{# /hv-split #}
 </div>
 {% endfor %}
 
@@ -648,6 +689,9 @@ document.addEventListener('submit', function (e) {
           if (el.type === 'checkbox') el.checked = kept[k]; else el.value = kept[k];
         });
       });
+      // The plots sit inside the setpoint form, so a swap made new, blank
+      // canvases: draw them again from what was last fetched.
+      if (window.hvPlotsRedraw) window.hvPlotsRedraw();
     }).catch(function () { /* keep what is shown; the next round tries again */ });
   }
   (function loop() {
@@ -655,6 +699,132 @@ document.addEventListener('submit', function (e) {
     var fast = f && f.dataset.moving === 'yes';
     setTimeout(function () { refresh().then(loop); }, fast ? 2000 : 10000);
   })();
+})();
+</script>
+
+<script>
+// THE HV PLOTS (14 October 2026). Per supply: VMON solid on the left axis,
+// IMON dashed on the right axis, VSET as a faint dotted target, one colour per
+// channel as in the table. Data from /api/hv/history - the web UI's memory of
+// the last six hours, seeded from the JSONL archive at start, never the
+// database (§8.1). The values are the 10-s means the services publish, so a
+// millisecond trip spike does not show here; the trip banner says when one
+// happened. A gap of more than a minute breaks the line rather than bridging it.
+(function () {
+  var COLOURS = {{ hv_colours | tojson }};
+  var GAP_S = 60;
+  var win = 900, last = null;
+  try { win = Number(localStorage.getItem('hvPlotWindow')) || 900; } catch (e) {}
+
+  function css(name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#888';
+  }
+  function niceRange(lo, hi) {
+    if (!isFinite(lo) || !isFinite(hi)) { lo = 0; hi = 1; }
+    if (lo > 0) lo = 0; if (hi < 0) hi = 0;          // zero always on the axis
+    if (hi - lo < 1e-9) { hi = lo + 1; }
+    var span = hi - lo, step = Math.pow(10, Math.floor(Math.log10(span / 4)));
+    [1, 2, 2.5, 5, 10].some(function (m) {
+      if (span / (step * m) <= 5) { step *= m; return true; } return false;
+    });
+    return {lo: Math.floor(lo / step) * step, hi: Math.ceil(hi / step) * step, step: step};
+  }
+  function fmt(v, step) {
+    var d = step >= 1 ? 0 : Math.min(3, Math.ceil(-Math.log10(step)));
+    return v.toFixed(d);
+  }
+  function draw(plot, supply, now) {
+    var canvas = plot.querySelector('canvas');
+    var dpr = window.devicePixelRatio || 1;
+    var W = canvas.clientWidth, H = canvas.clientHeight;
+    if (!W || !H) return;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    var g = canvas.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, W, H);
+    var L = 46, R = 46, T = 8, B = 22;
+    var t0 = now - win, x = function (t) { return L + (t - t0) / win * (W - L - R); };
+    var vlo = Infinity, vhi = -Infinity, ilo = Infinity, ihi = -Infinity, any = false;
+    supply.channels.forEach(function (c) {
+      (c.v || []).concat(c.vset || []).forEach(function (p) { any = true;
+        vlo = Math.min(vlo, p[1]); vhi = Math.max(vhi, p[1]); });
+      (c.i || []).forEach(function (p) { ilo = Math.min(ilo, p[1]); ihi = Math.max(ihi, p[1]); });
+    });
+    var vr = niceRange(vlo, vhi), ir = niceRange(ilo, ihi);
+    var yv = function (v) { return T + (vr.hi - v) / (vr.hi - vr.lo) * (H - T - B); };
+    var yi = function (v) { return T + (ir.hi - v) / (ir.hi - ir.lo) * (H - T - B); };
+    var dim = css('--dim'), line = css('--line');
+    g.font = '11px system-ui, sans-serif'; g.lineWidth = 1;
+    // grid and axes: voltage ticks on the left, current on the right
+    g.fillStyle = dim; g.strokeStyle = line;
+    for (var v = vr.lo; v <= vr.hi + vr.step / 2; v += vr.step) {
+      g.beginPath(); g.moveTo(L, yv(v)); g.lineTo(W - R, yv(v)); g.stroke();
+      g.textAlign = 'right'; g.fillText(fmt(v, vr.step), L - 4, yv(v) + 4);
+    }
+    for (var i = ir.lo; i <= ir.hi + ir.step / 2; i += ir.step) {
+      g.textAlign = 'left'; g.fillText(fmt(i, ir.step), W - R + 4, yi(i) + 4);
+    }
+    g.textAlign = 'left'; g.fillText('V', 2, T + 8);
+    g.textAlign = 'right'; g.fillText('µA', W - 2, T + 8);
+    // time ticks, local time
+    var stepT = win <= 900 ? 180 : win <= 3600 ? 900 : 3600;
+    g.textAlign = 'center';
+    for (var tt = Math.ceil(t0 / stepT) * stepT; tt <= now; tt += stepT) {
+      var d = new Date(tt * 1000);
+      g.fillText(('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2),
+                 x(tt), H - 6);
+      g.beginPath(); g.moveTo(x(tt), T); g.lineTo(x(tt), H - B); g.stroke();
+    }
+    function trace(pts, y, colour, dash, alpha, width) {
+      if (!pts || !pts.length) return;
+      g.save(); g.strokeStyle = colour; g.globalAlpha = alpha;
+      g.setLineDash(dash); g.lineWidth = width; g.beginPath();
+      var prev = null;
+      pts.forEach(function (p) {
+        if (p[0] < t0) return;
+        if (prev === null || p[0] - prev > GAP_S) g.moveTo(x(p[0]), y(p[1]));
+        else g.lineTo(x(p[0]), y(p[1]));
+        prev = p[0];
+      });
+      g.stroke(); g.restore();
+    }
+    supply.channels.forEach(function (c) {
+      var col = COLOURS[c.index % COLOURS.length];
+      trace(c.vset, yv, col, [1, 3], 0.55, 1);
+      trace(c.i, yi, col, [5, 4], 0.9, 1.3);
+      trace(c.v, yv, col, [], 1, 1.8);
+    });
+    if (!any) {
+      g.fillStyle = dim; g.textAlign = 'center';
+      g.fillText('no readings in this window yet', W / 2, H / 2);
+    }
+  }
+  function drawAll() {
+    if (!last) return;
+    document.body.dataset.hvWindow = String(win);
+    document.querySelectorAll('.hv-plot').forEach(function (plot) {
+      var supply = last.supplies.filter(function (s) { return s.id === plot.dataset.supply; })[0];
+      if (supply) draw(plot, supply, last.now);
+    });
+  }
+  function fetchAll() {
+    return fetch('/api/hv/history?window=' + win, {cache: 'no-store'})
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) { if (d) { last = d; drawAll(); } })
+      .catch(function () { /* keep the last picture; try again next round */ });
+  }
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest && e.target.closest('.hv-plot button[data-window]');
+    if (!b) return;
+    win = Number(b.dataset.window);
+    try { localStorage.setItem('hvPlotWindow', String(win)); } catch (err) {}
+    fetchAll();
+  });
+  document.body.dataset.hvWindow = String(win);
+  window.hvPlotsRedraw = drawAll;
+  window.addEventListener('resize', drawAll);
+  fetchAll();
+  setInterval(fetchAll, 10000);
 })();
 </script>
 
