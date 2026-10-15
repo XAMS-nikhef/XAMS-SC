@@ -768,7 +768,11 @@ document.addEventListener('submit', function (e) {
         if (!old || !neu) return;
         if ('moving' in neu.dataset) old.dataset.moving = neu.dataset.moving;
         if (!force && old.innerHTML === neu.innerHTML) return;
-        if (old.contains(document.activeElement)) return;
+        // Left alone only while something is being typed or chosen in it. A
+        // focused button does not count: the plot's window buttons keep the
+        // focus after a click, and the flow card then froze (15 October 2026).
+        var a = document.activeElement;
+        if (a && old.contains(a) && a.matches('input, select, textarea')) return;
         var kept = {};
         fields(old).forEach(function (el) {
           // Only what differs from what the server sent: a box nobody

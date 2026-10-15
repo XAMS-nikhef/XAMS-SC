@@ -170,3 +170,12 @@ def test_the_archive_seed_reads_the_cards_channels(tmp_path):
     (tmp_path / f"{day}.jsonl").write_text("\n".join(lines) + "\n")
     points = read_archive(tmp_path, now - 3600)
     assert set(points) == {"tt402", "fm101_total"}
+
+
+def test_a_focused_button_does_not_freeze_a_card(app):
+    """15 October 2026: the window buttons keep the focus after a click, and the
+    in-place refresh skipped every part holding the focus - so the flow total
+    stood still until the page was reloaded. Only a typing field holds a part."""
+    html = ui_client(app).get("/hv").text
+    assert "a.matches('input, select, textarea')" in html
+    assert "if (old.contains(document.activeElement)) return;" not in html
