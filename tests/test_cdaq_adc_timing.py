@@ -66,9 +66,10 @@ def mod9226():
     return ModuleTask("9226", "NI9226", [], adc_timing="high_speed")
 
 
-def test_the_9226_is_read_every_10_s_at_high_speed():
+def test_the_9226_is_read_every_10_s_with_the_default_timing():
+    """High speed was reverted the same afternoon: the temperatures jumped."""
     m = {m.alias: m for m in CdaqService(load(), RecordingBus(), simulate=False)._modules}
-    assert m["9226"].interval_s == 10 and m["9226"].adc_timing == "high_speed"
+    assert m["9226"].interval_s == 10 and m["9226"].adc_timing is None
     assert m["9207"].adc_timing is None          # the pressures keep the default
     assert m["9216_1"].adc_timing is None
 

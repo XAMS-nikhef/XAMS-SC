@@ -55,6 +55,11 @@ go (`task.ai_channels.all`), and a task that still will not start with it is
 rebuilt without the mode and started with the default, with a warning in the
 log: a slower conversion never costs the readings.
 
+**High speed reverted (same afternoon).** With high speed the 9226
+temperatures jumped up and down, so the 9226 is back on the default (high
+resolution) timing; it stays at a 10-s interval. The `adc_timing` option is
+kept for later use.
+
 ## The slot map
 
 | Alias | Module | Slot | Reads | Channels |
