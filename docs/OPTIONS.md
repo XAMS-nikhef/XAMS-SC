@@ -11,7 +11,7 @@ The underlying cause is LabVIEW's *form* rather than its capability. VIs are bin
 :::box
 **Conclusion**
 
-**Decided, 16 September 2026:** the Python service stack. The deciding factor was the CompactDAQ — it carries 20 of the 30 connected channels, has no maintained EPICS device support, and therefore requires a Python soft IOC in either design. EPICS would mean maintaining two paradigms for one small system. The full EPICS alternative is specified in [`notes/EPICS.md`](https://github.com/acolijn/XAMS-SC/tree/main/notes/EPICS.md), and as `notes/XAMS-SC-epics.pdf`, with the conditions under which it should be revisited.
+**Decided, 16 September 2026:** the Python service stack. The deciding factor was the CompactDAQ — it carries 20 of the 30 connected channels, has no maintained EPICS device support, and therefore requires a Python soft IOC in either design. EPICS would mean maintaining two paradigms for one small system. The full EPICS alternative is specified in [`notes/EPICS.md`](https://github.com/XAMS-nikhef/XAMS-SC/tree/main/notes/EPICS.md), and as `notes/XAMS-SC-epics.pdf`, with the conditions under which it should be revisited.
 
 Given the actual inventory — four instruments, roughly thirty connected channels, one rack — this is a **small** rewrite. Build a **Python service stack**: device drivers publishing to MQTT, PostgreSQL for history, Grafana for plots, and a small alarm service for notifications.
 

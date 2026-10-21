@@ -15,7 +15,7 @@ and where the two disagree that file is right. Anything marked **TBD** must be r
 
 **In scope.** Monitoring and convenience control of the XAMS slow-control hardware: one NI cDAQ-9174 chassis (20 connected channels of 40 available), two CAEN DT1470ET HV supplies (8 channels), one Lake Shore 335, one UPS. Storage, plotting, alarming, and a small web UI.
 
-**Platform decision, 16 September 2026.** A Python service stack on Windows, on the existing control PC. EPICS was specified in full as an alternative ([`notes/EPICS.md`](https://github.com/acolijn/XAMS-SC/tree/main/notes/EPICS.md)) and set aside: the CompactDAQ carries 20 of the 30 connected channels, has no maintained EPICS device support, and so needs a Python soft IOC either way — EPICS would mean maintaining two paradigms instead of one.
+**Platform decision, 16 September 2026.** A Python service stack on Windows, on the existing control PC. EPICS was specified in full as an alternative ([`notes/EPICS.md`](https://github.com/XAMS-nikhef/XAMS-SC/tree/main/notes/EPICS.md)) and set aside: the CompactDAQ carries 20 of the 30 connected channels, has no maintained EPICS device support, and so needs a Python soft IOC either way — EPICS would mean maintaining two paradigms instead of one.
 
 **Out of scope.** Safety interlocks. Anything that protects hardware or people belongs in hardware or in the instrument's own limits. See §10.
 

@@ -13,7 +13,7 @@
 **`docs/` is the manual and nothing else.** The PDF toolchain, the generated
 PDFs, the P&ID and the LabVIEW export used to live here too; they are working
 material rather than documentation, and are now in
-[`../notes/`](https://github.com/acolijn/XAMS-SC/tree/main/notes) with a README
+[`../notes/`](https://github.com/XAMS-nikhef/XAMS-SC/tree/main/notes) with a README
 of their own. `EPICS.md` went with them: it specifies in full a system that was
 never built, and the [decision document](OPTIONS.md) records the outcome. The
 two documents above stay here because they answer *why is it built this way*,
