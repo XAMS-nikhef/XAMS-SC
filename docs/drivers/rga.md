@@ -217,6 +217,12 @@ holds the analyser, and only ever switches emission **off** (audited as actor
 - p105 missing or stale → off after `guard_grace_s` (60 s) on top of the 30 s;
 - no scan or command for `emission_idle_off_s` (1 h) → off.
 
+The reason is shown on the RGA page for **one hour** (`NOTE_KEEP_S`), or until
+emission is next switched from the page, and then disappears; the audit
+record and `rga.log` keep it. The idle switch-off is routine and shown in grey,
+a guard switch-off in red. (Until 21 October 2026 the note stayed until the
+next emission command, so an idle switch-off sat on the page for days.)
+
 Emission switched on by another client (PV MassSpec) is left alone: without
 control nothing can be written, and that is the other client's to look after.
 

@@ -94,13 +94,14 @@ class TestNoPageHasTwoJobs:
     def test_control_points_at_the_rga_page(self, client):
         assert 'href="/rga"' in client.get("/hv").text
 
-    def test_control_still_explains_what_it_will_not_do(self, client):
-        """The §10a limits — no enable, no MAXV, no TRIP. That is the text
-        that stays, scoped to the high-voltage section."""
+    def test_control_points_at_what_it_will_not_do(self, client):
+        """The §10a limits — no enable, no MAXV, no TRIP. The explanation is
+        in the manual (21 October 2026: a card of text at the foot of the
+        page was never read); the page links to it."""
         body = client.get("/hv").text
 
         assert "what this page cannot do" in body
-        assert "front-panel enable switch" in body
+        assert "/manual/operating/webui/#control-high-voltage" in body
 
 
 class TestTheNavBar:
@@ -132,7 +133,8 @@ class TestTheControlPageLayout:
         assert 'id="cryostat"' in pair and 'id="flow"' in pair
 
     def test_they_fold_to_one_column_on_a_narrow_window(self, client):
-        assert "@media (max-width:900px)" in client.get("/hv").text
+        # 1200 px since 73ec4af; the test had kept the old 900.
+        assert "@media (max-width:1200px)" in client.get("/hv").text
 
     def test_the_two_cards_are_the_same_height(self, client):
         """They used to end wherever their own text ran out, which left a

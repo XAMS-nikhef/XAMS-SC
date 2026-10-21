@@ -64,6 +64,15 @@ EMISSION_PENDING_BIT = 1 << 28      # asked for, not yet on (API: "System Status
 # How long a requested emission or EM state is waited for before the page
 # stops saying "starting..." / "stopping..." and says it did not follow.
 SWITCH_WAIT_S = 30.0
+
+# How long a note on why emission or the EM went off by itself stays on the
+# RGA page. Long enough to be seen by whoever comes back to the analyser,
+# short enough not to become furniture; the audit record keeps it for good.
+NOTE_KEEP_S = 3600.0
+
+# The idle switch-off is the analyser being looked after as designed, not a
+# fault: shown as information rather than in red.
+IDLE_REASON = "no scan or command"
 # The datasheet's maximum operating pressures (QMG 250 M, "Technical data"),
 # hPa = mbar: 5e-4 with the Faraday cup, 5e-5 with the C-SEM (electron
 # multiplier). The configured limits may be lower, never higher.
@@ -164,7 +173,11 @@ class RgaService(BaseService):
         self._emission_idle_off_s = float(self._spec.get("emission_idle_off_s", 3600))
         self._status_word: int | None = None      # systemStatus, last read
         self._hw_errors: int | None = None
-        self._emission_note: str | None = None    # why emission last went off by itself
+        # Why emission / the EM last went off by itself, and when. SHOWN FOR
+        # NOTE_KEEP_S only (21 October 2026): a note was cleared only by the
+        # next emission command, so "switched off after 60 min idle" stayed on
+        # the page for days. The audit record and rga.log keep it for good.
+        self._notes: dict[str, tuple[str, float, bool]] = {}
 
         # The electron multiplier's own, lower, limit on the same p105 (step
         # 4). Same freshness rules and grace as the emission guard. A limit
@@ -177,7 +190,6 @@ class RgaService(BaseService):
                 f"above 0 and at most {min(EM_DATASHEET_MAX_MBAR, self._guard_limit):g} "
                 f"mbar (datasheet {EM_DATASHEET_MAX_MBAR:g}, emission limit "
                 f"{self._guard_limit:g})")
-        self._em_note: str | None = None          # why the EM last went off by itself
         # What emission and the EM were last asked to be, and when: until the
         # analyser reports that state (or SWITCH_WAIT_S passes) the page shows
         # them as switching and keeps the button greyed. The analyser's own
@@ -367,13 +379,15 @@ class RgaService(BaseService):
                                "pending": emission_to,
                                "wanted": emission_to,
                                "interlock": bool((self._status_word or 0) & INTERLOCK_BIT),
-                               "note": self._emission_note},
+                               "note": self._note("emission"),
+                               "note_routine": self._note_routine("emission")},
                   "em": {"on": self.em_is_on(),
                          "gain_calibrated": self._em_gain_calibrated,
                          "pending": em_to,
                          "wanted": em_to,
                          "interlock": bool((self._status_word or 0) & EM_INTERLOCK_BIT),
-                         "note": self._em_note, **self._em_settings},
+                         "note": self._note("em"),
+                         "note_routine": self._note_routine("em"), **self._em_settings},
                   "guard": self.guard_view()}
         self.bus.publish_raw(TOPIC_RGA_INFO, json.dumps(record), retain=True)
 
@@ -540,10 +554,7 @@ class RgaService(BaseService):
                 note = (f"asked for {'On' if on else 'Off'} at {iso(utcnow())} but the "
                         f"analyser did not follow within {SWITCH_WAIT_S:.0f} s")
                 log.warning("RGA %s: %s", kind, note)
-                if kind == "emission":
-                    self._emission_note = note
-                else:
-                    self._em_note = note
+                self._set_note(kind, note)
             else:
                 return "On" if on else "Off"
         if (self._status_word or 0) & bit:
@@ -613,7 +624,8 @@ class RgaService(BaseService):
             return False
         self._expect("em", False)
         if actor == "rga service":
-            self._em_note = f"switched off by the service at {iso(utcnow())}: {reason}"
+            self._set_note("em", f"switched off by the service at {iso(utcnow())}: {reason}",
+                           routine=IDLE_REASON in reason)
             log.warning("RGA EM switched OFF by the service: %s", reason)
         self._audit("rga_em_off", "rga", "On", "Off", "ok", reason, actor)
         with self._acq_lock:
@@ -640,6 +652,23 @@ class RgaService(BaseService):
         if reason is not None:
             self._em_off(reason)
 
+    def _set_note(self, kind: str, text: str, routine: bool = False) -> None:
+        self._notes[kind] = (text, time.monotonic(), routine)
+
+    def _note(self, kind: str) -> str | None:
+        """The note for emission or the EM, or None once NOTE_KEEP_S old."""
+        entry = self._notes.get(kind)
+        if entry is None:
+            return None
+        if time.monotonic() - entry[1] > NOTE_KEEP_S:
+            del self._notes[kind]
+            return None
+        return entry[0]
+
+    def _note_routine(self, kind: str) -> bool:
+        entry = self._notes.get(kind)
+        return bool(entry and entry[2])
+
     def _watch_emission(self, control: dict) -> None:
         """Switch emission off when it must not stay on. Only ever OFF.
 
@@ -655,7 +684,7 @@ class RgaService(BaseService):
                 busy = self._acq is not None and self._acq["state"] == "scanning"
                 idle = time.monotonic() - self._last_activity
             if not busy and idle > self._emission_idle_off_s:
-                reason = (f"no scan or command for {idle / 60:.0f} min "
+                reason = (f"{IDLE_REASON} for {idle / 60:.0f} min "
                           f"(limit {self._emission_idle_off_s / 60:.0f} min)")
         if reason is None:
             return
@@ -667,7 +696,8 @@ class RgaService(BaseService):
             log.error("COULD NOT SWITCH RGA EMISSION OFF (%s): %s", reason, exc)
             return
         self._expect("emission", False)
-        self._emission_note = f"switched off by the service at {iso(utcnow())}: {reason}"
+        self._set_note("emission", f"switched off by the service at {iso(utcnow())}: {reason}",
+                       routine=IDLE_REASON in reason)
         log.warning("RGA emission switched OFF by the service: %s", reason)
         self._audit("rga_emission_off", "rga", "On", "Off", "ok", reason, "rga service")
 
@@ -924,7 +954,7 @@ class RgaService(BaseService):
                       f"read-back still says {asked}; check the emission state "
                       "in a few seconds", old=old, new=want)
             return
-        self._emission_note = None
+        self._notes.pop("emission", None)
         log.warning("RGA emission %s requested by %s%s", want, actor,
                     f" ({self.guard_allows()[1]})" if want == "On" else "")
         self._ack(ACK_RGA_EMISSION, True, action, actor,
@@ -984,7 +1014,7 @@ class RgaService(BaseService):
         except (OSError, MMSPError, PermissionError) as exc:
             self._ack(ACK_RGA_EM, False, action, actor, f"the analyser said: {exc}")
             return
-        self._em_note = None
+        self._notes.pop("em", None)
         self._expect("em", True)
         why = self.em_guard_allows()[1]
         log.warning("RGA EM On requested by %s (%s)", actor, why)

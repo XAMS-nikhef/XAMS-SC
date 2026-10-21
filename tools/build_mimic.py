@@ -68,7 +68,7 @@ EXTRA_PLACEMENTS = {
 # one below 1000) would be wrong. The turbo speed is a whole number of Hz, and
 # "0.00 Hz" for a stopped pump reads as a measurement with three digits of
 # precision.
-DIGITS = {"turbo_speed": 0}
+DIGITS = {"turbo_speed": 0, "ln2_mass": 0}
 
 # Drawn equipment whose OUTLINE is coloured by its state (section 8.2).
 #
@@ -97,6 +97,59 @@ SYMBOLS = {
 # at the next save in Illustrator. When the drawing itself says P105, the
 # entry below finds nothing and can be removed.
 RELABEL = {"Ppirani": "P105"}
+
+
+# Instruments the drawing does not have yet, ADDED when the mimic is built -
+# in memory, like RELABEL, so the PDF from Illustrator stays untouched.
+#
+# SG401, the LN2 dewar scale (21 October 2026): a bubble with the strain-gauge
+# stroke, exactly like SG101 / SG102 on the gas bottles, above the "N2" vessel
+# (the LN2 dewar, with V_dewar). SG because a platform scale is load cells, as
+# SG101/102 are; 4xx because the LN2 belongs to the cryostat's cooling, with
+# TT401/TT402. It shows the NET LN2 mass, channel ln2_mass (TAG_ALIASES).
+#
+# Placed relative to a label on the drawing, in ORIGINAL page coordinates:
+#   tag -> (anchor label, circle centre dx, dy, leader x offset, vessel top dy)
+# The leader runs from the circle's left side across to `leader dx` and down
+# to the vessel top, the shape SG101's leader has. Measured on the 17/05/2024
+# drawing: the N2 label centre is (614.6, 555.9), the vessel top y = 535.3.
+# When the drawing itself carries SG401, the tag sweep finds it there and the
+# entry below must be removed (it would draw a second one).
+ADD_INSTRUMENTS = {"SG401": ("N2", 17.05, -54.85, -14.6, -20.55)}
+
+# A tag on the drawing whose channel is not simply its name in lower case.
+# ln2_mass was named, and archived, before it had a tag.
+TAG_ALIASES = {"SG401": "ln2_mass"}
+
+BUBBLE_R = 11.65          # SG101's circle is 23.3 pt across
+LINE_W = 0.375            # the drawing's instrument line weight
+
+
+def add_instruments(page) -> None:
+    """Draw the ADD_INSTRUMENTS bubbles, with their stroke, leader and tag."""
+    words = {w[4]: w for w in page.get_text("words")}
+    for tag, (anchor, dx, dy, lx, top) in ADD_INSTRUMENTS.items():
+        if tag in words:
+            print(f"  WARNING: the drawing already has {tag}; not adding it")
+            continue
+        spot = words.get(anchor)
+        if spot is None:
+            print(f"  WARNING: no label {anchor!r} on the drawing; {tag} not added")
+            continue
+        ax, ay = (spot[0] + spot[2]) / 2, (spot[1] + spot[3]) / 2
+        cx, cy = ax + dx, ay + dy
+        black = (0, 0, 0)
+        page.draw_circle(pymupdf.Point(cx, cy), BUBBLE_R, color=black, width=LINE_W)
+        # The strain-gauge stroke: a diameter, as on SG101 and SG102.
+        page.draw_line(pymupdf.Point(cx, cy - BUBBLE_R), pymupdf.Point(cx, cy + BUBBLE_R),
+                       color=black, width=LINE_W)
+        page.draw_polyline([pymupdf.Point(cx - BUBBLE_R, cy), pymupdf.Point(ax + lx, cy),
+                            pymupdf.Point(ax + lx, ay + top)], color=black, width=LINE_W)
+        # The tag beside the circle, set like SG101's: 8.04 pt, running top to
+        # bottom on the portrait page (rotate=270, as in relabel()).
+        page.insert_text(pymupdf.Point(cx + BUBBLE_R + 2.4, cy - BUBBLE_R),
+                         tag, fontsize=8.04, fontname="helv", rotate=270)
+        print(f"  added {tag} beside {anchor!r}")
 
 
 def relabel(page) -> None:
@@ -199,7 +252,8 @@ def recolour_for_dark(root) -> None:
 
 
 def channel_for(tag: str, channels: set[str]) -> str | None:
-    return tag.lower() if tag.lower() in channels else None
+    name = TAG_ALIASES.get(tag, tag.lower())
+    return name if name in channels else None
 
 
 # How much blank paper to leave around the drawing once it is cropped to its
@@ -337,6 +391,7 @@ def main() -> int:
     # tag position below must be measured in the cropped space.
     strip_sheet_furniture(page)
     relabel(page)
+    add_instruments(page)
     width, height = page.rect.width, page.rect.height
 
     svg_text = page.get_svg_image(text_as_path=False)
@@ -501,6 +556,8 @@ def main() -> int:
         # as "0.02" or "0.00".
         if config.channels[channel].unit == "mbar":
             value.set("data-format", "exp")
+        if channel in DIGITS:
+            value.set("data-digits", str(DIGITS[channel]))
         if bubble is not None and unit_text:
             unit = ET.SubElement(root, f"{{{SVG_NS}}}text")
             unit.set("id", f"u-{channel}")

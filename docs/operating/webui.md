@@ -172,6 +172,14 @@ it. Percent is of full scale, so it answers "how hard is it working" only once
 you know what full scale is; watts is the number to compare against the heat
 load.
 
+### The LN₂ dewar on the drawing
+
+**SG401**, a bubble with the strain-gauge stroke like SG101 and SG102, above the
+N₂ vessel (the LN₂ dewar, with V_dewar): the **net** LN₂ mass in whole kg,
+channel `ln2_mass`. The drawing itself does not have it yet; `tools/build_mimic.py`
+adds it when the mimic is built (`ADD_INSTRUMENTS`, `TAG_ALIASES`). When the
+P&ID is revised with SG401 on it, those two entries go.
+
 ### The turbo on the drawing
 
 The turbo pump's **outline** is coloured by its state, and the speed is written
@@ -308,7 +316,8 @@ Alarms page; the master switch for everything is on Alarms. If the alarm
 engine has not reported the switch, the tile says so and offers no button.
 
 The cryostat, the flow integrator and the LN₂ dewar are the three equal tiles
-at the top of the page (stacked on a narrow window); the high voltage, which
+at the top of the page, each with its readings on the left and its plot on the
+right (stacked on a narrow window); the high voltage, which
 needs far more room, is below them and has
 [a section of its own](#control-high-voltage).
 
@@ -351,6 +360,24 @@ They are separate on purpose, and only the third is a command:
 
 Nothing in the software can touch the first two, by design. Two hand gates sit
 between code and an electrode, and neither is reachable from here.
+
+### Reading the columns
+
+**VMON and IMON** are what the supply measures now; **VSET** is what the
+channel was told to hold. VSET is written from the boxes on this page, read
+back from the board and audited; VMON and IMON are only ever read.
+
+Voltages are stored **signed**. The supplies report unsigned magnitudes with
+polarity as a separate parameter, so the sign is applied in software: the
+cathode reads negative, the anode positive (§7.2). A supply that is off reads
+0 and is shown as off, not as a fault.
+
+The two units are told apart by asking each board for its own serial number
+over the wire, never by COM port, so swapping their USB cables is harmless
+(§6.2).
+
+These explanations used to sit in a card at the foot of the Control page; that
+card is now one line linking here.
 
 ### The Status column
 

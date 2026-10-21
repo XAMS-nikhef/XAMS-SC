@@ -332,3 +332,14 @@ class TestThePkrGauge:
     def test_p105_is_on_the_drawing_and_its_raw_volts_are_not(self, config):
         assert config.channels["p105"].on_pid is True
         assert config.channels["p105_v"].on_pid is False
+
+
+def test_the_ln2_dewar_has_its_bubble():
+    """SG401, added by build_mimic.py above the N2 vessel (21 October 2026):
+    the net LN2 mass, in a bubble like SG101 and SG102, in whole kg."""
+    svg = (pathlib.Path(__file__).resolve().parents[1] / "src" / "xams_sc"
+           / "api" / "static" / "xams_pid.svg").read_text(encoding="utf-8")
+    assert "SG401" in svg
+    value = re.search(r'<text id="v-ln2_mass"[^>]*>', svg).group(0)
+    assert 'data-unit="kg"' in value and 'data-digits="0"' in value
+    assert 'id="u-ln2_mass"' in svg          # in a bubble: unit on its own line
