@@ -228,19 +228,19 @@ channels:
      rtd: {type: PT3750, r0: 1000.0, wiring: 3},
      description: "bottom of the detector vessel - SENSOR FAILED 2026-09-17, awaiting replacement"}
   - {name: tt203, device: cdaq, phys: 9226/ai2, kind: rtd, unit: C, legacy: TT203,
-     enabled: false,
+     enabled: true,
      rtd: {type: PT3750, r0: 1000.0, wiring: 3}, description: "top of the bucket"}
   - {name: tt204, device: cdaq, phys: 9226/ai3, kind: rtd, unit: C, legacy: TT204,
-     enabled: false,
+     enabled: true,
      rtd: {type: PT3750, r0: 1000.0, wiring: 3}, description: "top of the bucket"}
   - {name: tt205, device: cdaq, phys: 9226/ai4, kind: rtd, unit: C, legacy: TT205,
-     enabled: false,
+     enabled: true,
      rtd: {type: PT3750, r0: 1000.0, wiring: 3}, description: "top of the bucket"}
   - {name: tt206, device: cdaq, phys: 9226/ai5, kind: rtd, unit: C, legacy: TT206,
-     enabled: false,
+     enabled: true,
      rtd: {type: PT3750, r0: 1000.0, wiring: 3}, description: "bottom of the bucket"}
   - {name: tt207, device: cdaq, phys: 9226/ai6, kind: rtd, unit: C, legacy: TT207,
-     enabled: false,
+     enabled: true,
      rtd: {type: PT3750, r0: 1000.0, wiring: 3}, description: "bottom of the bucket"}
   - {name: spare_9226_ai7, device: cdaq, phys: 9226/ai7, kind: rtd, unit: C, enabled: false,
      rtd: {type: PT3750, r0: 1000.0, wiring: 3}, description: "not connected"}

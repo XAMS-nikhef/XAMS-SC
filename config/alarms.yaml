@@ -37,7 +37,7 @@ channels:
   # ------------------------------------------------------------------
   pmain:
     low:  {value: 0.9, severity: minor, notify: [email]}
-    high: {value: 2.1, severity: minor, notify: [email]}
+    high: {value: 2.25, severity: minor, notify: [email]}
     hihi: {value: 2.5, severity: major, notify: [sms, email, sound]}
 
   # ------------------------------------------------------------------
