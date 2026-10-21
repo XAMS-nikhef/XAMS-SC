@@ -35,6 +35,7 @@ WRITES = [
     ("/lakeshore/range", {"range": "off"}),
     ("/flow/reset", {"by": "someone"}),
     ("/alarms/notify", {"enabled": "0"}),
+    ("/alarms/arm", {"channel": "ln2_mass", "enabled": "0"}),
     ("/alarms/recipients", {"name-0": "x", "email-0": "x@example.org"}),
     ("/operator", {"operator": "somebody else"}),
 ]

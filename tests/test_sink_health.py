@@ -298,7 +298,7 @@ class TestTheHeartbeat:
     def test_no_service_is_exempt_from_reporting(self):
         rows = service_rows({}, {})
 
-        assert set(rows) == {"cdaq", "caen", "lakeshore", "ups", "turbo", "rga", "derived",
+        assert set(rows) == {"cdaq", "caen", "lakeshore", "ups", "turbo", "rga", "scale", "derived",
                              "alarms", "sinks"}
         assert all(r["healthy"] is False for r in rows.values())
         assert not any("expects_heartbeat" in r for r in rows.values()), \

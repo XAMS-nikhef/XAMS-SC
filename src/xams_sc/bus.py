@@ -114,6 +114,15 @@ TOPIC_NOTIFY = "xams/cmd/alarms/notify"
 ACK_NOTIFY = "xams/ack/alarms/notify"
 STATUS_NOTIFY = "xams/status/notify"
 
+# One alarm switched off on its own (alarms.yaml `switchable`), for a
+# condition that is expected for a while - the LN2 dewar empty or away, for
+# instance. Like the master switch it stops only the notification; the alarm
+# is still evaluated and shown. Only channels listed as switchable can be
+# switched, and the state of all of them is RETAINED on STATUS_ARMED.
+TOPIC_ARM = "xams/cmd/alarms/arm"
+ACK_ARM = "xams/ack/alarms/arm"
+STATUS_ARMED = "xams/status/armed"
+
 # What the RGA is and who controls it (docs/drivers/rga.md): identity,
 # firmware, filaments, units and the controlling client, RETAINED for the RGA
 # page. Descriptive, not a measurement - it is outside xams/meas, so the

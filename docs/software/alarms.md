@@ -102,6 +102,32 @@ The acknowledged flag is published with the alarm state, so the UI can show
 "still in alarm, somebody has seen it" — which is a different thing from
 "resolved", and the two must never look alike.
 
+### Switching one alarm off
+
+Some conditions are expected for days: the LN₂ dewar empty or taken away for
+a refill. For those, `alarms.yaml` lists channels as **`switchable`**, and each
+gets its own switch (for now only `ln2_mass`, on the LN₂ tile of the
+[Control page](../operating/webui.md#ln2-dewar)).
+
+It follows the rules of the master switch on the Alarms page:
+
+- **delivery only.** The alarm is still evaluated, published on
+  `xams/alarm/<channel>`, shown in colour, listed on Alarms and recorded; only
+  the email and SMS are skipped, with a warning in `alarms.log`;
+- **switching it back on is not quiet.** `last_notified` is not stamped while
+  off, so a condition still present announces itself on its next reading;
+- **a restart does not re-arm it.** The state is kept in
+  `data/alarm_armed.json` and logged at CRITICAL on every start while off;
+- **only listed channels.** `set_armed` refuses any channel not in
+  `switchable`, so it cannot be used to silence `pmain` one request at a time,
+  and a switch file left from an earlier configuration silences nothing;
+- **audited**, including a refusal (`action: alarm_switch`).
+
+Command `xams/cmd/alarms/arm` `{"channel", "enabled", "by"}`, answered on
+`xams/ack/alarms/arm`; the state of every switch is retained on
+`xams/status/armed`. `xams-ctl check` refuses a `switchable` name that is not
+a channel with thresholds.
+
 ---
 
 ## What it publishes

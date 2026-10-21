@@ -11,6 +11,7 @@ Verified 17 September 2026.
 | Lake Shore 335 | `335A12T` on COM6 |
 | UPS | APC, `3S2005X18782`, USB HID |
 | Turbo tap | EXSYS EX-13009, FTDI `0403:6001` serial `DIBIURQ3`, listen-only on the HiPace 80 RS-485 |
+| LN₂ scale | All Scales Europe ISCI (Dini Argeo DFW06, fw 3.11), S/N 0100164095; RJ45 RS-232 via FTDI `0403:6001` serial `AU05TI3P` |
 
 Neither CAEN unit exposes a USB serial number, so they are told apart by asking
 each board for its own `BDSNUM` — never by COM port number (§6.2).

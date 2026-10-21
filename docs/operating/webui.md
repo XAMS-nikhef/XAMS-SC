@@ -293,8 +293,23 @@ Equivalently, from a terminal:
 .\.venv\Scripts\python.exe -m xams_sc.cli.xams_ctl flow-reset --by <you>
 ```
 
-The cryostat and the flow integrator sit side by side at the top of the page;
-the high voltage, which needs far more room, is below them and has
+### LN2 dewar
+
+The mass of LN₂ in the dewar, large, coloured by the alarm engine (amber below
+the warning, red below the alarm), with the scale's own reading and the empty
+dewar it is computed from underneath, and a plot of the mass with the two
+levels as dotted lines. See [the scale driver](../drivers/scale.md).
+
+**Switch alarm off / on** silences this one alarm's email and SMS — for when
+the dewar is deliberately empty or away. It is confirmed, audited with your
+name, survives a restart, and the tile says **alarm OFF** with who and when
+for as long as it is. The value still turns amber and red and stays on the
+Alarms page; the master switch for everything is on Alarms. If the alarm
+engine has not reported the switch, the tile says so and offers no button.
+
+The cryostat, the flow integrator and the LN₂ dewar are the three equal tiles
+at the top of the page (stacked on a narrow window); the high voltage, which
+needs far more room, is below them and has
 [a section of its own](#control-high-voltage).
 
 ### What cannot be changed here, by design

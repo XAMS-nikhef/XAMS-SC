@@ -21,6 +21,7 @@ SERVICES = {
     "ups": ("xams_sc.devices.ups", "UpsService"),
     "turbo": ("xams_sc.devices.turbo", "TurboService"),
     "rga": ("xams_sc.devices.rga", "RgaService"),
+    "scale": ("xams_sc.devices.scale", "ScaleService"),
     "derived": ("xams_sc.devices.derived", "DerivedService"),
 }
 

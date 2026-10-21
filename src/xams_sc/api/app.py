@@ -46,7 +46,8 @@ from fastapi.responses import (HTMLResponse, JSONResponse, PlainTextResponse,
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from ..bus import (ACK_RGA_CONTROL, ACK_RGA_EM, ACK_RGA_EMISSION, ACK_RGA_SAVE, ACK_RGA_SCAN,
+from ..bus import (ACK_ARM, TOPIC_ARM,
+                   ACK_RGA_CONTROL, ACK_RGA_EM, ACK_RGA_EMISSION, ACK_RGA_SAVE, ACK_RGA_SCAN,
                    TOPIC_RGA_CONTROL, TOPIC_RGA_EM, TOPIC_RGA_EMISSION, TOPIC_RGA_SAVE, TOPIC_RGA_SCAN,
                    ACK_HV_CLEAR, ACK_HV_OUTPUT, ACK_HV_VSET, ACK_LS_RANGE,
                    ACK_LS_SETPOINT, ACK_NOTIFY, TOPIC_AUDIT, TOPIC_HV_CLEAR,
@@ -793,6 +794,30 @@ def create_app(broker: str = "127.0.0.1", port: int = 1883, *,
             "/hv?reset=ok&total=%.3f#flow" % closed.get("total_g", 0.0),
             status_code=303)
 
+    @app.post("/alarms/arm")
+    def alarms_arm(request: Request, channel: str = Form(""),
+                   enabled: str = Form(""), by: str = Form("")):
+        """Switch ONE alarm's notification off or on (alarms.yaml
+        `switchable`; for now the LN2 dewar).
+
+        The engine decides whether the channel may be switched and answers;
+        this page only reports what came back. Like the master switch, off
+        stops the telling, not the alarm: it is still evaluated and shown.
+        """
+        from urllib.parse import quote
+        who = operator_of(request, by)
+        wanted = enabled.strip().lower() in ("1", "true", "on", "yes")
+        answer = state.command(TOPIC_ARM, ACK_ARM,
+                               {"channel": channel, "enabled": wanted,
+                                "by": who}, match=("channel",))
+        if not answer.get("ok"):
+            return RedirectResponse(
+                "/hv?ln2_error=" + quote(str(answer.get("reason", "refused")))
+                + "#ln2", status_code=303)
+        log.warning("alarm %s switched %s by %s", channel,
+                    "ON" if wanted else "OFF", who)
+        return RedirectResponse("/hv?ln2_ok=1#ln2", status_code=303)
+
     @app.get("/status", response_class=HTMLResponse)
     def status(request: Request):
         by_device: dict[str, list] = {}
@@ -1100,6 +1125,7 @@ def create_app(broker: str = "127.0.0.1", port: int = 1883, *,
         return page(request, "hv.html", supplies=supplies, moving=moving,
                     hv_ok=q.get("hv_ok"), hv_error=q.get("hv_error"),
                     lakeshore=lakeshore_view(), flow=state.flow_total(),
+                    ln2=state.ln2(), ln2_error=q.get("ln2_error"),
                     ls_ok=q.get("ls_ok"), ls_error=q.get("ls_error"),
                     reset=q.get("reset"), reset_total=q.get("total"))
 

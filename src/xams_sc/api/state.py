@@ -18,7 +18,7 @@ import time
 from collections import deque
 from dataclasses import dataclass
 
-from ..bus import (ACK_HV_CLEAR, ACK_HV_OUTPUT, ACK_HV_VSET, ACK_LS_RANGE, ACK_LS_SETPOINT,
+from ..bus import (ACK_ARM, ACK_HV_CLEAR, ACK_HV_OUTPUT, ACK_HV_VSET, ACK_LS_RANGE, ACK_LS_SETPOINT,
                    ACK_NOTIFY, ACK_RGA_CONTROL, ACK_RGA_EM, ACK_RGA_EMISSION, ACK_RGA_SAVE, ACK_RGA_SCAN,
                    TOPIC_RGA_SCANDATA, TOPIC_ALARM, TOPIC_BACKUP, TOPIC_FLOW_RESET,
                    TOPIC_HV_SWITCHING, TOPIC_HV_TRIP, TOPIC_MEAS, TOPIC_RELOAD, TOPIC_RGA_INFO,
@@ -40,10 +40,12 @@ HISTORY_S = 6 * 3600
 
 # The non-HV channels the Control page plots (14 October 2026): the Lake
 # Shore card (both sensors, output 1's setpoint and heater) and the Integrated
-# flow card (the rate and the running total).
+# flow card (the rate and the running total). The LN2 card (21 October
+# 2026): the mass in the dewar.
 PLOTTED_CHANNELS = frozenset({
     "tt401", "tt402", "ls_setpoint_1", "ls_heater_1",
     "fm101", "fm101_total",
+    "ln2_mass",
 })
 
 
@@ -126,6 +128,9 @@ class SystemState:
         self._rga_scan: str | None = None
         self._limits: dict | None = None
         self._notify: dict | None = None
+        # The per-channel alarm switches (alarms.yaml `switchable`), retained
+        # by the engine on xams/status/armed. None until it has spoken.
+        self._armed: dict | None = None
         # Latched HV trips, by hv_vset channel, from the CAEN service's
         # retained records. Emptied by a clear.
         self._hv_trips: dict[str, dict] = {}
@@ -168,6 +173,14 @@ class SystemState:
                 return
             with self._lock:
                 self._notify = loaded if isinstance(loaded, dict) else None
+            return
+        if len(parts) == 3 and parts[2] == "armed":
+            try:
+                loaded = json.loads(payload)
+            except ValueError:
+                return
+            with self._lock:
+                self._armed = loaded if isinstance(loaded, dict) else None
             return
         if len(parts) == 3 and parts[2] == "limits":
             try:
@@ -468,6 +481,7 @@ class SystemState:
         self.bus.subscribe(ACK_HV_OUTPUT, self._on_ack)
         self.bus.subscribe(ACK_HV_CLEAR, self._on_ack)
         self.bus.subscribe(ACK_NOTIFY, self._on_ack)
+        self.bus.subscribe(ACK_ARM, self._on_ack)
         self.bus.subscribe(ACK_RGA_CONTROL, self._on_ack)
         self.bus.subscribe(ACK_RGA_SCAN, self._on_ack)
         self.bus.subscribe(ACK_RGA_SAVE, self._on_ack)
@@ -512,7 +526,7 @@ class SystemState:
         return [v for v in views if v is not None]
 
     def services(self) -> list[dict]:
-        known = ["cdaq", "caen", "lakeshore", "ups", "turbo", "rga", "derived", "alarms",
+        known = ["cdaq", "caen", "lakeshore", "ups", "turbo", "rga", "scale", "derived", "alarms",
                  "sinks"]
         with self._lock:
             beats, states = dict(self._heartbeats), dict(self._states)
@@ -577,6 +591,28 @@ class SystemState:
         return {"known": True, "enabled": bool(data.get("enabled", True)),
                 "by": str(data.get("by") or ""),
                 "at": str(data.get("at") or "")}
+
+    def alarm_switch(self, channel: str) -> dict:
+        """One switchable alarm's switch: on, off, or UNKNOWN when the engine
+        has not said - and unknown is drawn as unknown, never as on, for the
+        same reason as the master switch."""
+        with self._lock:
+            data = None if self._armed is None else self._armed.get(channel)
+        if not isinstance(data, dict):
+            return {"known": False, "enabled": None, "by": "", "at": ""}
+        return {"known": True, "enabled": bool(data.get("enabled", True)),
+                "by": str(data.get("by") or ""), "at": str(data.get("at") or "")}
+
+    def ln2(self) -> dict:
+        """The LN2 card on the Control page."""
+        limits = (self.limits() or {}).get("ln2_mass") or {}
+        cfg = self.config.channels.get("ln2_mass")
+        return {"mass": self.channel("ln2_mass"),
+                "tare_kg": cfg.offset if cfg else 0.0,
+                "gross": self.channel("ln2_gross"),
+                "mains": self.channel("ln2_scale_mains"),
+                "switch": self.alarm_switch("ln2_mass"),
+                "warn_kg": limits.get("low"), "alarm_kg": limits.get("lolo")}
 
     def unhealthy_channels(self) -> list[ChannelView]:
         return [c for c in self.channels() if not c.healthy]

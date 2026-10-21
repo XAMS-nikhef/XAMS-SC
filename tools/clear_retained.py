@@ -53,7 +53,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from xams_sc.config import load  # noqa: E402
 from xams_sc.model import parse_iso, utcnow  # noqa: E402
 
-KNOWN_SERVICES = {"cdaq", "caen", "lakeshore", "ups", "turbo", "sinks", "derived", "alarms"}
+KNOWN_SERVICES = {"cdaq", "caen", "lakeshore", "ups", "turbo", "scale", "sinks", "derived", "alarms"}
 
 
 def collect(host: str, port: int, seconds: float) -> dict[str, str]:

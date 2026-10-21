@@ -31,7 +31,7 @@ LOG_DIR = Path(os.environ.get("XAMS_LOG_DIR", ROOT / "logs"))
 
 VALID_KINDS = {
     "voltage", "current", "rtd", "hv_vmon", "hv_imon", "hv_stat", "hv_vset",
-    "temperature", "status", "power", "setpoint",
+    "temperature", "status", "power", "setpoint", "weight",
 }
 
 
@@ -274,6 +274,21 @@ def _parse_channels(raw: dict, devices: dict) -> dict[str, Channel]:
     return channels
 
 
+def _check_switchable(alarms: dict, channels: dict) -> None:
+    """`switchable` in alarms.yaml names alarms that can be switched off one
+    at a time. A name that is not a channel with thresholds is a typo, and a
+    typo here would leave a switch on the page that switches nothing."""
+    names = alarms.get("switchable") or []
+    if not isinstance(names, list):
+        raise ConfigError("alarms.yaml: `switchable` must be a list of channels")
+    limits = alarms.get("channels") or {}
+    for name in names:
+        if name not in channels:
+            raise ConfigError(f"alarms.yaml: switchable {name!r} is not a channel")
+        if name not in limits:
+            raise ConfigError(f"alarms.yaml: switchable {name!r} has no thresholds")
+
+
 def load(config_dir: Path | str | None = None) -> Config:
     """Load every configuration file, validate, and compute the config hash."""
     d = Path(config_dir) if config_dir else CONFIG_DIR
@@ -288,6 +303,7 @@ def load(config_dir: Path | str | None = None) -> Config:
     recipients = _read(recipients_path) if recipients_path.exists() else {"recipients": []}
 
     channels = _parse_channels(raw_channels, devices)
+    _check_switchable(alarms, channels)
 
     # hv_defaults.yaml is optional and excluded from the hash, for the same
     # reason recipients.yaml is: it does not affect the data. A default is a

@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from ..bus import STATUS_NOTIFY, TOPIC_ALARM, TOPIC_MEAS, Bus
+from ..bus import STATUS_ARMED, STATUS_NOTIFY, TOPIC_ALARM, TOPIC_MEAS, Bus
 from ..model import Measurement, Quality, iso, utcnow
 
 log = logging.getLogger(__name__)
@@ -101,7 +101,8 @@ class AlarmEngine:
     """
 
     def __init__(self, bus: Bus, config, notifier=None, on_alarm=None,
-                 notify_state_path: Path | str = "data/alarm_notify.json"):
+                 notify_state_path: Path | str = "data/alarm_notify.json",
+                 armed_state_path: Path | str = "data/alarm_armed.json"):
         self.bus = bus
         self.config = config
         self.notifier = notifier
@@ -113,6 +114,12 @@ class AlarmEngine:
         self.notify_changed_by = ""
         self.notify_changed_at = ""
         self._restore_notifications()
+        # PER-CHANNEL SWITCHES, for the few alarms alarms.yaml lists as
+        # `switchable`. Same rule as the master switch: delivery only, and a
+        # restart does not quietly re-arm one somebody switched off.
+        self.armed_state_path = Path(armed_state_path)
+        self.armed: dict[str, dict] = {}
+        self._restore_armed()
         # Called when an alarm is raised — the flight recorder subscribes here
         # so the dump happens at the moment of the alarm (§9.1).
         self.on_alarm = on_alarm
@@ -122,6 +129,7 @@ class AlarmEngine:
         self.thresholds = alarms.get("channels") or {}
         self.routing = alarms.get("routing") or {}
         self.staleness = alarms.get("staleness") or {}
+        self.switchable = frozenset(alarms.get("switchable") or [])
 
         self.stale_after = float(self.defaults.get("stale_after_seconds", 60))
         self.min_repeat_s = float(self.defaults.get("min_repeat_minutes", 15)) * 60
@@ -309,6 +317,14 @@ class AlarmEngine:
                         "switched OFF, by %s", state.channel, state.state,
                         self.notify_changed_by or "somebody")
             return
+        # The per-channel switch, by the same rules: evaluated, published and
+        # recorded already; `last_notified` left alone so switching it back on
+        # announces a condition still present on its next reading.
+        if not self.is_armed(state.channel):
+            log.warning("NOT notifying for %s (%s): this alarm is switched "
+                        "OFF, by %s", state.channel, state.state,
+                        self.armed.get(state.channel, {}).get("by") or "somebody")
+            return
         state.last_notified = time.monotonic()
         if self.notifier is None:
             return
@@ -480,9 +496,11 @@ class AlarmEngine:
         self.thresholds = alarms.get("channels") or {}
         self.routing = alarms.get("routing") or {}
         self.staleness = alarms.get("staleness") or {}
+        self.switchable = frozenset(alarms.get("switchable") or [])
         self.stale_after = float(self.defaults.get("stale_after_seconds", 60))
         self.min_repeat_s = float(self.defaults.get("min_repeat_minutes", 15)) * 60
         self.hysteresis_fraction = float(self.defaults.get("hysteresis", 0.02))
+        self.publish_armed()
 
         # A channel that has been DISABLED is forgotten entirely: its alarm is
         # withdrawn and it is no longer checked for staleness. Withdrawn by
@@ -599,6 +617,78 @@ class AlarmEngine:
                 "was": was, "active": sorted(active), "by": by,
                 "at": self.notify_changed_at}
 
+    # ------------------------------------------- per-channel switches
+
+    def is_armed(self, channel: str) -> bool:
+        """Would an alarm on this channel be delivered, as far as its own
+        switch goes? Always True for a channel that is not switchable: a
+        switch file left over from an earlier configuration cannot silence a
+        channel that alarms.yaml no longer lets anybody switch."""
+        if channel not in self.switchable:
+            return True
+        return bool(self.armed.get(channel, {}).get("enabled", True))
+
+    def _restore_armed(self) -> None:
+        try:
+            data = json.loads(self.armed_state_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        if isinstance(data, dict):
+            self.armed = {str(k): dict(v) for k, v in data.items()
+                          if isinstance(v, dict)}
+
+    def _save_armed(self) -> None:
+        try:
+            self.armed_state_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.armed_state_path.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(self.armed), encoding="utf-8")
+            os.replace(tmp, self.armed_state_path)
+        except OSError:
+            log.exception("could not persist the alarm switches to %s",
+                          self.armed_state_path)
+
+    def armed_view(self) -> dict:
+        """Every switchable channel and its switch; absent means on."""
+        return {ch: {"enabled": self.is_armed(ch),
+                     "by": str(self.armed.get(ch, {}).get("by") or ""),
+                     "at": str(self.armed.get(ch, {}).get("at") or "")}
+                for ch in sorted(self.switchable)}
+
+    def publish_armed(self) -> None:
+        """Retained, so a page connecting later sees every switch at once."""
+        self.bus.publish_raw(STATUS_ARMED, json.dumps(
+            self.armed_view(), separators=(",", ":")), retain=True)
+
+    def set_armed(self, channel: str, enabled: bool, by: str) -> dict:
+        """Switch one alarm's notification off or on.
+
+        Refused for a channel alarms.yaml does not list as switchable: this
+        is a switch for an expected condition, and it must not be a way to
+        silence pmain or the UPS one request at a time.
+        """
+        if channel not in self.switchable:
+            return {"ok": False, "channel": channel,
+                    "reason": f"{channel} is not a switchable alarm"}
+        was = self.is_armed(channel)
+        with self._lock:
+            self.armed[channel] = {"enabled": bool(enabled),
+                                   "by": by or "unknown", "at": iso(utcnow())}
+            state = self._states.get(channel)
+            current = state.state if state else "ok"
+        self._save_armed()
+        self.publish_armed()
+        if enabled:
+            log.warning("ALARM %s SWITCHED ON by %s%s", channel, by,
+                        f" - still {current}, will notify on its next reading"
+                        if current != "ok" else "")
+        else:
+            log.critical("ALARM %s SWITCHED OFF by %s. Still evaluated and "
+                         "shown; nobody will be told about it until it is "
+                         "switched back on.", channel, by)
+        return {"ok": True, "channel": channel, "enabled": bool(enabled),
+                "was": was, "state": current, "by": by,
+                "at": self.armed[channel]["at"]}
+
     def acknowledge(self, channel: str) -> bool:
         """Stop the repeating notification. The condition stays active.
 
@@ -648,6 +738,7 @@ class AlarmEngine:
         self.bus.subscribe(f"{TOPIC_ALARM}/+", self._on_retained_alarm)
         self._publish_limits()
         self.publish_notifications()
+        self.publish_armed()
 
         def pump():
             while not self._stop.is_set():
