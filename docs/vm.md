@@ -72,7 +72,7 @@ copy, so **updating the VM is: push to GitHub, run the script.**
 On a brand-new VM, clone first:
 
 ```bash
-sudo git clone https://github.com/acolijn/XAMS-SC.git /opt/xams-sc
+sudo git clone https://github.com/XAMS-nikhef/XAMS-SC.git /opt/xams-sc
 sudo SERVER_NAME=plotit-xams.nikhef.nl LABPC_IP=192.16.192.82 \
      /opt/xams-sc/tools/vm/install_vm.sh
 ```

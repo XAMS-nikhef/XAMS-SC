@@ -4,7 +4,7 @@
 #
 # First time, on the VM:
 #
-#     sudo git clone https://github.com/acolijn/XAMS-SC.git /opt/xams-sc
+#     sudo git clone https://github.com/XAMS-nikhef/XAMS-SC.git /opt/xams-sc
 #     sudo LABPC_IP=<lab PC IP> WATCHDOG_EMAIL=<address> SMTP_HOST=<relay:port> \
 #          /opt/xams-sc/tools/vm/install_vm.sh
 #
@@ -52,7 +52,7 @@
 set -euo pipefail
 
 REPO_DIR=/opt/xams-sc
-REPO_URL=https://github.com/acolijn/XAMS-SC.git
+REPO_URL=https://github.com/XAMS-nikhef/XAMS-SC.git
 CONF_DIR=/etc/xams-vm
 ENV_FILE=$CONF_DIR/vm.env
 CRED_FILE=$CONF_DIR/credentials

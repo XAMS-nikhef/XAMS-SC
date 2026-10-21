@@ -10,8 +10,8 @@
 site_name: XAMS Slow Control
 site_description: Acquisition, storage, alarming and control of the XAMS detector
 site_author: XAMS
-repo_url: https://github.com/acolijn/XAMS-SC
-repo_name: acolijn/XAMS-SC
+repo_url: https://github.com/XAMS-nikhef/XAMS-SC
+repo_name: XAMS-nikhef/XAMS-SC
 edit_uri: edit/main/docs/
 
 docs_dir: docs
