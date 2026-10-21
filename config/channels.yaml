@@ -211,7 +211,7 @@ channels:
   # tt201 and tt203..tt207 (tt202 stays off until its own sensor is replaced).
   # ------------------------------------------------------------------
   - {name: tt201, device: cdaq, phys: 9226/ai0, kind: rtd, unit: C, legacy: TT201,
-     enabled: false,
+     enabled: true,
      rtd: {type: PT3750, r0: 1000.0, wiring: 3}, description: "suction tube"}
   # SENSOR FAILED, 17 September 2026. Reads open-circuit: swings between roughly
   # -245 and +1327 C, identically to the unconnected 9226/ai7, where a working
