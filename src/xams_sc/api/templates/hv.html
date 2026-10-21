@@ -15,8 +15,10 @@
    column again when the window is too narrow to hold both without squeezing
    — the same rule the P&ID column follows. */
 .hv-btn.working { color:var(--warn); border-color:var(--warn); cursor:progress; }
+/* THREE EQUAL TILES since the LN2 dewar joined them (21 October 2026): the
+   Lake Shore, the flow and the dewar, each a third of the row. */
 .control-pair { display:grid; gap:1.2rem; align-items:stretch;
-                grid-template-columns:repeat(2, minmax(0,1fr)); }
+                grid-template-columns:repeat(3, minmax(0,1fr)); }
 @media (max-width:1200px) { .control-pair { grid-template-columns:minmax(0,1fr); } }
 /* EQUAL HEIGHT, not each card to its own content. `align-items:start` let
    them end wherever their text ran out, so two boxes of different height sat
@@ -24,7 +26,8 @@
    wrapper; the wrapper is a flex row so the single card inside it fills that
    height rather than only the width. Content stays at the top of each. */
 .control-pair > div { display:flex; }
-.control-pair > div > .card { margin:0; flex:1; min-width:0; }
+.control-pair > div > .card { margin:0; flex:1; min-width:0;
+                               container-type:inline-size; }
 /* Readings and controls on the left, a compact history plot on the right. */
 .control-split { display:grid; grid-template-columns:minmax(240px,1fr) minmax(0,1fr);
                  align-items:start; }
@@ -33,6 +36,10 @@
 .control-readings td { overflow-wrap:anywhere; }
 .control-readings .reset-form { flex-wrap:wrap; }
 @media (max-width:600px) { .control-split { grid-template-columns:minmax(0,1fr); } }
+/* A third of a laptop screen is too narrow for readings AND plot side by
+   side, so inside a narrow tile the plot goes under the readings. Measured on
+   the tile, not the window: the tile is what is narrow. */
+@container (max-width:620px) { .control-split { grid-template-columns:minmax(0,1fr); } }
 /* THE PLOT BESIDE THE TABLE (14 October 2026): what each supply's channels
    did over the last minutes to hours, next to what they read now. Below the
    table when the window is too narrow to give both room. */
@@ -72,6 +79,8 @@ body[data-hv-window="21600"] .hv-plot button[data-window="21600"] {
 
 {% if ls_error %}<div class="flash bad" style="margin:0 0 1rem 0">
   <strong>Refused — nothing was changed.</strong> {{ ls_error }}</div>{% endif %}
+{% if ln2_error %}<div class="flash bad" style="margin:0 0 1rem 0">
+  <strong>Refused — nothing was changed.</strong> {{ ln2_error }}</div>{% endif %}
 {% if reset == 'failed' %}<div class="flash bad" style="margin:0 0 1rem 0">
   <strong>The derived service did not acknowledge.</strong> Nothing was reset.
   </div>{% endif %}
@@ -230,6 +239,86 @@ body[data-hv-window="21600"] .hv-plot button[data-window="21600"] {
       Reset closes the period into <code>flow_periods</code> and opens a new
       one; nothing is erased (§7.5). Also
       <code>xams-ctl flow-reset --by &lt;you&gt;</code>.
+    </div>
+  </div>
+</div>
+
+<div id="ln2">
+<div class="card">
+    <h2>LN₂ dewar</h2>
+    <div class="control-split">
+    <div class="control-readings">
+    <div class="body">
+      {% set m = ln2.mass %}
+      {# Coloured by the alarm engine's verdict, not by comparing here: the
+         page must show what the engine decided, hysteresis and all. #}
+      <div style="font-size:1.9rem;font-variant-numeric:tabular-nums;
+                  font-family:Consolas,monospace"
+           class="{{ 'bad' if m and m.alarm in ('major', 'critical')
+                     else 'warn' if m and m.alarm == 'minor' else '' }}">
+        {{ m.formatted() if m else '—' }}
+        <span class="unit" style="font-size:1rem">kg</span>
+      </div>
+      {% set g = ln2.gross %}
+      <div class="dim" style="margin-top:.15rem;font-variant-numeric:tabular-nums">
+        scale {{ g.formatted() if g else '—' }} kg
+        − empty dewar {{ '%.2f'|format(ln2.tare_kg) }} kg
+      </div>
+      {% set p = ln2.mains %}
+      {% if p and p.healthy and p.value is not none and p.value < 0.5 %}
+        <div class="warn" style="margin-top:.3rem">scale indicator on its own battery</div>
+      {% endif %}
+      <div class="dim" style="margin-top:.5rem">
+        warning below {{ ln2.warn_kg if ln2.warn_kg is not none else '?' }} kg ·
+        alarm below {{ ln2.alarm_kg if ln2.alarm_kg is not none else '?' }} kg
+      </div>
+
+      {# THE SWITCH for this one alarm (alarms.yaml `switchable`). Off stops
+         the email and SMS, nothing else: the value still turns amber and red,
+         and the Alarms page still lists it. Unknown - the engine has not
+         said - offers no button, because a button needs a state to change. #}
+      {% set sw = ln2.switch %}
+      <div style="margin-top:.6rem">
+        {% if not sw.known %}
+          <span class="warn">alarm switch unknown</span>
+          <span class="dim">— the alarm engine has not reported it</span>
+        {% elif sw.enabled %}
+          <span class="good">alarm on</span>
+        {% else %}
+          <span class="bad"><strong>alarm OFF</strong></span>
+          <span class="dim">— by {{ sw.by or 'somebody' }}{{ (', ' + sw.at[:16]|replace('T', ' ')) if sw.at }} UTC;
+            nobody is told</span>
+        {% endif %}
+      </div>
+      {% if sw.known %}
+      <form method="post" action="/alarms/arm" class="reset-form"
+            data-confirm="{{ 'Switch the LN2 alarm OFF? It is still shown here, but nobody gets an email or SMS until it is switched back on.'
+                             if sw.enabled else 'Switch the LN2 alarm back ON?' }}"
+            onsubmit="return confirm(this.dataset.confirm);">
+        <input type="hidden" name="channel" value="ln2_mass">
+        <input type="hidden" name="enabled" value="{{ '0' if sw.enabled else '1' }}">
+        <button type="submit">{{ 'Switch alarm off' if sw.enabled else 'Switch alarm on' }}</button>
+      </form>
+      {% endif %}
+    </div>
+    </div>{# /control-readings #}
+    {# The LN2 mass in kg, with the warning and alarm levels as dotted lines
+       when they fall inside the plot (21 October 2026). #}
+    <div class="hv-plot" data-plot="ln2">
+    <div class="bar">
+      <span class="dim">last</span>
+      <button type="button" class="hv-btn" data-window="900">15 min</button>
+      <button type="button" class="hv-btn" data-window="3600">1 h</button>
+      <button type="button" class="hv-btn" data-window="21600">6 h</button>
+      <span class="legend dim" style="margin-left:auto"></span>
+    </div>
+    <canvas></canvas>
+    </div>
+    </div>{# /control-split #}
+    <div class="note">
+      Scale reading minus the empty dewar (<code>channels.yaml</code>). The
+      switch silences only this alarm's email and SMS; the master switch is
+      on <a href="/alarms">Alarms</a>.
     </div>
   </div>
 </div>
@@ -674,7 +763,7 @@ document.addEventListener('submit', function (e) {
 // switching, so its button comes back the moment the board has got there.
 // Paused from a submit until the answer replaces the page.
 (function () {
-  var LIVE = ['cryostat', 'flow', 'setpoints', 'hv-forms'];
+  var LIVE = ['cryostat', 'flow', 'ln2', 'setpoints', 'hv-forms'];
   var busy = false;
   // NO BUTTON ON THIS PAGE RELOADS IT (14 October 2026). Every write was a
   // plain form post answered with a redirect, so the whole page was loaded
@@ -691,6 +780,7 @@ document.addEventListener('submit', function (e) {
     '/hv/apply':           {err: 'hv_error', box: 'hv-msg'},
     '/lakeshore/setpoint': {err: 'ls_error', box: 'ctl-msg'},
     '/lakeshore/range':    {err: 'ls_error', box: 'ctl-msg'},
+    '/alarms/arm':         {err: 'ln2_error', box: 'ctl-msg'},
     '/flow/reset':         {err: 'reset', bad: 'failed', box: 'ctl-msg',
                             text: 'the derived service did not acknowledge; nothing was reset.'}
   };
@@ -917,7 +1007,15 @@ document.addEventListener('submit', function (e) {
     flow: {left: {unit: 'g/min'}, right: {unit: 'g', noZero: true},
       series: [
         {ch: 'fm101', label: 'flow', axis: 'left', col: 0, dash: [], w: 1.8},
-        {ch: 'fm101_total', label: 'total', axis: 'right', col: 1, dash: [5, 4], w: 1.3}]}
+        {ch: 'fm101_total', label: 'total', axis: 'right', col: 1, dash: [5, 4], w: 1.3}]},
+    // One axis only, and not forced to zero: the slope is what is read off
+    // it. The warning and alarm levels come from the engine's published
+    // limits, drawn only when they fall inside the range.
+    ln2: {left: {unit: 'kg', noZero: true},
+      refs: [{v: {{ ln2.warn_kg | tojson }}, colour: '--warn'},
+             {v: {{ ln2.alarm_kg | tojson }}, colour: '--bad'}],
+      series: [
+        {ch: 'ln2_mass', label: 'LN₂', axis: 'left', col: 0, dash: [], w: 1.8}]}
   };
   var cardData = null;
   function drawCard(plot, spec, d) {
@@ -944,7 +1042,7 @@ document.addEventListener('submit', function (e) {
       if (a.lo !== undefined) return niceRange(a.lo, a.hi, true);
       return niceRange(ext[side][0], ext[side][1], a.noZero);
     }
-    var rl = range('left'), rr = range('right');
+    var rl = range('left'), rr = spec.right ? range('right') : rl;
     var yl = function (v) { return T + (rl.hi - v) / (rl.hi - rl.lo) * (H - T - B); };
     var yr = function (v) { return T + (rr.hi - v) / (rr.hi - rr.lo) * (H - T - B); };
     var dim = css('--dim'), line = css('--line');
@@ -954,11 +1052,19 @@ document.addEventListener('submit', function (e) {
       g.beginPath(); g.moveTo(L, yl(v)); g.lineTo(W - R, yl(v)); g.stroke();
       g.textAlign = 'right'; g.fillText(fmt(v, rl.step), L - 4, yl(v) + 4);
     }
-    for (var u = rr.lo; u <= rr.hi + rr.step / 2; u += rr.step) {
-      g.textAlign = 'left'; g.fillText(fmt(u, rr.step), W - R + 4, yr(u) + 4);
+    if (spec.right) {
+      for (var u = rr.lo; u <= rr.hi + rr.step / 2; u += rr.step) {
+        g.textAlign = 'left'; g.fillText(fmt(u, rr.step), W - R + 4, yr(u) + 4);
+      }
     }
     g.textAlign = 'left'; g.fillText(spec.left.unit, 2, 10);       // above the plot area
-    g.textAlign = 'right'; g.fillText(spec.right.unit, W - 2, 10);
+    if (spec.right) { g.textAlign = 'right'; g.fillText(spec.right.unit, W - 2, 10); }
+    (spec.refs || []).forEach(function (ref) {
+      if (ref.v === null || ref.v === undefined || ref.v < rl.lo || ref.v > rl.hi) return;
+      g.save(); g.strokeStyle = css(ref.colour); g.setLineDash([2, 3]);
+      g.beginPath(); g.moveTo(L, yl(ref.v)); g.lineTo(W - R, yl(ref.v)); g.stroke();
+      g.restore();
+    });
     var stepT = win <= 900 ? 180 : win <= 3600 ? 900 : 3600;
     g.textAlign = 'center';
     for (var tt = Math.ceil(t0 / stepT) * stepT; tt <= now; tt += stepT) {

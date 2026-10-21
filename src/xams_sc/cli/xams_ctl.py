@@ -34,7 +34,7 @@ from ..config import CONFIG_DIR, LOG_DIR, ConfigError, load, wants_alarms
 #
 #     python -m xams_sc.devices sim
 #
-SERVICES = ["sinks", "cdaq", "caen", "lakeshore", "ups", "turbo", "rga", "derived",
+SERVICES = ["sinks", "cdaq", "caen", "lakeshore", "ups", "turbo", "rga", "scale", "derived",
             "alarms", "webui"]
 
 PID_DIR = LOG_DIR

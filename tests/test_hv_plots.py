@@ -123,7 +123,7 @@ def test_window_is_clamped(app):
 
 def test_page_has_a_plot_per_supply_and_window_buttons_that_do_not_submit(app):
     html = ui_client(app).get("/hv").text
-    assert html.count('class="hv-plot"') == 4      # + the Lake Shore and flow cards
+    assert html.count('class="hv-plot"') == 5      # + the Lake Shore, flow and LN2 cards
     assert 'data-supply="hv_1"' in html and 'data-supply="hv_2"' in html
     for w in ("900", "3600", "21600"):
         assert f'<button type="button" class="hv-btn" data-window="{w}">' in html
@@ -156,7 +156,7 @@ def test_plots_history_answers_only_plotted_channels(app):
 def test_the_lake_shore_and_flow_cards_carry_a_plot(app):
     html = ui_client(app).get("/hv").text
     assert 'data-plot="lakeshore"' in html and 'data-plot="flow"' in html
-    assert html.count('class="hv-plot"') == 4      # two supplies, two cards
+    assert html.count('class="hv-plot"') == 5      # two supplies, three cards
 
 
 def test_the_archive_seed_reads_the_cards_channels(tmp_path):

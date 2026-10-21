@@ -153,6 +153,30 @@ turbo:
   # Startup listens this long for a valid reply before refusing to start.
   identify_s: 5
 
+scale:
+  # LN2 dewar scale: All Scales Europe ISCI weight indicator, 600 kg x 0.05 kg,
+  # S/N 0100164095. Inside it is a Dini Argeo DFW: `VER` answers
+  # "VER,311,DFW06" (firmware 3.11). Read over the RS-232 PC port - the RJ45
+  # socket on the back, which is NOT Ethernet - with the supplier's RJ45-USB
+  # cable (FTDI). Connected and checked 2026-10-21. See docs/drivers/scale.md.
+  #
+  # Factory serial settings, nothing changed on the indicator: PC port mode
+  # `ondE` (answers on request), 9600 baud, 8-N-1, CR LF.
+  #
+  # QUERIES ONLY. The protocol also has tare, zero, key presses and display
+  # messages; the driver sends only the commands in its whitelist.
+  #
+  # The serial is what pyserial reports for the FTDI port: the USB serial
+  # AU05TI3P plus the interface letter A (COM8 at the time). The turbo's RS-485
+  # tap has the SAME vid:pid, so the port is chosen by this serial BEFORE
+  # anything is written to it - a probe on the turbo's port would put bytes on
+  # the pump's bus.
+  model: "All Scales Europe ISCI (Dini Argeo DFW06)"
+  match: {vid: "0403", pid: "6001", serial: "AU05TI3PA"}
+  idn_contains: "DFW06"
+  connection: rs232
+  baud: 9600
+
 rga:
   # Pfeiffer PrismaPro QMG 250 residual gas analyser on the pre-volume, on the
   # lab Ethernet. HTTP/JSON ("MMSP") on port 80. Read-only discovery

@@ -170,5 +170,6 @@ could not be told apart from measurements afterwards.
 | [Lake Shore 335](lakeshore.md) | cryostat temperature control |
 | [UPS](ups.md) | mains and battery |
 | [Turbo pump](turbo.md) | HiPace 80 status and speed, listen-only on RS-485 |
+| [LN2 dewar scale](scale.md) | ISCI (Dini Argeo DFW06) weight on RS-232, queries only |
 | [Derived channels](derived.md) | computed, not read |
 | [Writing a new driver](writing.md) | start to finish |

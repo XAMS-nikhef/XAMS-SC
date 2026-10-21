@@ -48,7 +48,8 @@ def engine_with(thresholds, notify_state=None, **defaults):
     # assertions below into assertions about nothing.
     engine = AlarmEngine(
         bus, cfg, notifier=notifier,
-        notify_state_path=notify_state or (_ISOLATED / "alarm_notify.json"))
+        notify_state_path=notify_state or (_ISOLATED / "alarm_notify.json"),
+        armed_state_path=_ISOLATED / "alarm_armed.json")
     return engine, bus, notifier
 
 
@@ -519,3 +520,92 @@ class TestDisabledChannels:
             {"state": "major"}))
 
         assert bus.published_on("xams/alarm/tt103") == []
+
+
+class TestOneAlarmSwitchedOff:
+    """alarms.yaml `switchable`: one alarm off on its own, for an expected
+    condition (the LN2 dewar empty or away). The same rule as the master
+    switch - delivery only - and only for the channels listed."""
+
+    THRESHOLDS = {
+        "ln2_mass": {"low": {"value": 100.0, "severity": "minor"},
+                     "lolo": {"value": 20.0, "severity": "major",
+                              "notify": ["sms", "email"]}},
+        "pmain": {"hihi": {"value": 2.0, "severity": "major"}},
+    }
+
+    def engine(self, tmp_path, armed_path=None):
+        cfg = load()
+        cfg.alarms = {"defaults": {}, "channels": self.THRESHOLDS,
+                      "staleness": {}, "switchable": ["ln2_mass"]}
+        bus, notifier = RecordingBus(), RecordingNotifier()
+        engine = AlarmEngine(bus, cfg, notifier=notifier,
+                             notify_state_path=tmp_path / "notify.json",
+                             armed_state_path=armed_path or tmp_path / "armed.json")
+        return engine, bus, notifier
+
+    def kg(self, value):
+        return Measurement(t=utcnow(), channel="ln2_mass", value=value,
+                           unit="kg", quality=Quality.OK)
+
+    def test_on_by_default(self, tmp_path):
+        engine, _, notifier = self.engine(tmp_path)
+        assert engine.is_armed("ln2_mass")
+        engine.on_measurement(self.kg(10.0))
+        assert len(notifier.sent) == 1
+
+    def test_off_tells_nobody_but_the_alarm_still_happens(self, tmp_path):
+        engine, bus, notifier = self.engine(tmp_path)
+        assert engine.set_armed("ln2_mass", False, "apc")["ok"]
+        engine.on_measurement(self.kg(10.0))
+        assert notifier.sent == []
+        assert [s.channel for s in engine.active()] == ["ln2_mass"]
+        published = [json.loads(p) for t, p in bus.published
+                     if t == "xams/alarm/ln2_mass"]
+        assert published[-1]["state"] == "major"
+
+    def test_other_alarms_are_untouched(self, tmp_path):
+        engine, _, notifier = self.engine(tmp_path)
+        engine.set_armed("ln2_mass", False, "apc")
+        engine.on_measurement(reading("pmain", 2.5))
+        assert len(notifier.sent) == 1
+
+    def test_a_channel_not_listed_cannot_be_switched(self, tmp_path):
+        """Not a way to silence pmain one request at a time."""
+        engine, _, notifier = self.engine(tmp_path)
+        answer = engine.set_armed("pmain", False, "apc")
+        assert not answer["ok"] and "not a switchable" in answer["reason"]
+        engine.on_measurement(reading("pmain", 2.5))
+        assert len(notifier.sent) == 1
+
+    def test_switching_back_on_is_not_quiet(self, tmp_path):
+        engine, _, notifier = self.engine(tmp_path)
+        engine.set_armed("ln2_mass", False, "apc")
+        engine.on_measurement(self.kg(10.0))
+        answer = engine.set_armed("ln2_mass", True, "apc")
+        assert answer["state"] == "major"
+        engine.on_measurement(self.kg(9.0))
+        assert len(notifier.sent) == 1
+
+    def test_a_restart_does_not_re_arm_it(self, tmp_path):
+        engine, _, _ = self.engine(tmp_path)
+        engine.set_armed("ln2_mass", False, "apc")
+        again, _, notifier = self.engine(tmp_path)
+        assert not again.is_armed("ln2_mass")
+        again.on_measurement(self.kg(10.0))
+        assert notifier.sent == []
+
+    def test_a_stale_switch_file_cannot_silence_an_unlisted_channel(self, tmp_path):
+        path = tmp_path / "armed.json"
+        path.write_text(json.dumps({"pmain": {"enabled": False}}))
+        engine, _, notifier = self.engine(tmp_path, armed_path=path)
+        engine.on_measurement(reading("pmain", 2.5))
+        assert len(notifier.sent) == 1
+
+    def test_published_retained_for_the_pages(self, tmp_path):
+        engine, bus, _ = self.engine(tmp_path)
+        engine.set_armed("ln2_mass", False, "apc")
+        last = [json.loads(p) for t, p in bus.published
+                if t == "xams/status/armed"][-1]
+        assert last["ln2_mass"]["enabled"] is False
+        assert last["ln2_mass"]["by"] == "apc"

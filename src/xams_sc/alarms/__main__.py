@@ -21,7 +21,7 @@ from pathlib import Path
 
 import yaml
 
-from ..bus import ACK_NOTIFY, TOPIC_NOTIFY, Bus
+from ..bus import ACK_ARM, ACK_NOTIFY, TOPIC_ARM, TOPIC_NOTIFY, Bus
 from ..config import CONFIG_DIR, LOG_DIR, ConfigError, load, wants_alarms
 from ..model import ServiceState
 from ..service import SingleInstance, setup_logging
@@ -150,8 +150,38 @@ def main(argv=None) -> int:
         }, separators=(",", ":")))
         bus.publish_raw(ACK_NOTIFY, json.dumps(result, separators=(",", ":")))
 
+    def handle_arm(topic: str, payload: str) -> None:
+        """One switchable alarm off or on (alarms.yaml `switchable`).
+
+        Answered like the master switch, and audited whether or not it was
+        refused, so an attempt to switch off a channel that may not be
+        switched is on record too.
+        """
+        try:
+            request = json.loads(payload)
+            channel = str(request["channel"])
+            wanted = bool(request["enabled"])
+        except (ValueError, KeyError, TypeError):
+            log.error("arm command ignored, malformed: %r", payload)
+            bus.publish_raw(ACK_ARM, json.dumps(
+                {"ok": False, "reason": "malformed command"}))
+            return
+        by = str(request.get("by") or "")
+        result = engine.set_armed(channel, wanted, by)
+        bus.publish_raw("xams/audit", json.dumps({
+            "t": result.get("at") or "", "actor": by or "unknown",
+            "action": "alarm_switch", "target": channel,
+            "old": None if not result.get("ok") else
+                   ("on" if result["was"] else "off"),
+            "new": "on" if wanted else "off",
+            "result": "ok" if result.get("ok") else "refused",
+            "detail": result.get("reason", ""),
+        }, separators=(",", ":")))
+        bus.publish_raw(ACK_ARM, json.dumps(result, separators=(",", ":")))
+
     bus.subscribe("xams/cmd/all/reload", handle_reload)
     bus.subscribe(TOPIC_NOTIFY, handle_notify)
+    bus.subscribe(TOPIC_ARM, handle_arm)
 
     bus.connect()
     bus.publish_state("alarms", ServiceState.RUNNING)
@@ -160,6 +190,12 @@ def main(argv=None) -> int:
     # Said at every start, because a switch thrown a fortnight ago and
     # restored from a file is exactly the one nobody remembers (§4.4a).
     engine.publish_notifications()
+    engine.publish_armed()
+    for channel, sw in engine.armed_view().items():
+        if not sw["enabled"]:
+            log.critical("ALARM %s IS SWITCHED OFF (by %s, %s): evaluated "
+                         "and shown, nobody is told.", channel,
+                         sw["by"] or "somebody", sw["at"] or "unrecorded time")
     if not engine.notifications_enabled:
         log.critical("ALARM NOTIFICATIONS ARE SWITCHED OFF (by %s, %s). "
                      "Alarms are evaluated and recorded, and NOBODY WILL BE "

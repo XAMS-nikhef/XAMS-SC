@@ -61,6 +61,10 @@ class SimService(BaseService):
             base, noise = span * 0.8, abs(span) * 0.001
         elif ch.name.startswith("turbo_"):
             return 1500.0 if ch.name == "turbo_speed" else 0.0
+        elif ch.device == "scale":
+            gross = 280.0 + math.sin(2 * math.pi * elapsed / 600.0) * 0.2
+            return {"ln2_gross": gross, "ln2_mass": gross - ch.offset,
+                    "ln2_scale_mains": 1.0}.get(ch.name, 0.0)
         elif ch.name.startswith("ups_"):
             return {"ups_on_battery": 0.0, "ups_battery_pct": 100.0,
                     "ups_runtime_min": 42.0}.get(ch.name, 0.0)

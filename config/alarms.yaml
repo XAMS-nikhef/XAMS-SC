@@ -84,6 +84,28 @@ channels:
     high: {value: 30.0, severity: minor, notify: [email]}
     hihi: {value: 35.0, severity: major, notify: [sms, email, sound]}
 
+  # ------------------------------------------------------------------
+  # LN2 dewar. Levels from A.P. Colijn, 21 October 2026: a warning below
+  # 100 kg (time to order or fetch a refill), an alarm below 20 kg (nearly
+  # empty). ln2_mass is the gross weight minus the empty dewar, 136.75 kg
+  # (channels.yaml). At 2 % hysteresis the warning clears above 102 kg and
+  # the alarm above 20.4 kg.
+  #
+  # SWITCHABLE (below): it can be switched off from the Control page while
+  # the dewar is deliberately empty or away.
+  # ------------------------------------------------------------------
+  ln2_mass:
+    low:  {value: 100.0, severity: minor, notify: [email]}
+    lolo: {value: 20.0, severity: major, notify: [sms, email, sound]}
+
+# Alarms that may be switched off ONE AT A TIME, from the Control page or
+# with the arm command, for a condition that is expected for a while. Like
+# the master switch on /alarms it stops only the notification: the alarm is
+# still evaluated, shown on every page and recorded. A channel not listed
+# here cannot be switched, whatever is sent. The switches are kept in
+# data/alarm_armed.json and survive a restart.
+switchable: [ln2_mass]
+
 routing:
   sms:   {recipients: enabled}    # everyone enabled in recipients.yaml
   email: {recipients: enabled}

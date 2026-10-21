@@ -593,6 +593,30 @@ channels:
      description: "RGA electronics box internal temperature"}
 
   # ------------------------------------------------------------------
+  # LN2 dewar scale - All Scales Europe ISCI indicator (a Dini Argeo DFW06)
+  # under the dewar, on its RS-232 PC port (devices.yaml `scale`,
+  # docs/drivers/scale.md). Both weights come from ONE reading of the gross
+  # weight, so they cannot disagree; `phys: ln2` is that same reading with the
+  # empty dewar subtracted (two channels may not share a phys).
+  #
+  # ln2_gross is the scale's own number, dewar and all, and is what is kept:
+  # ln2_mass is derived from it with the empty-dewar weight as the offset, so
+  # a better tare later is a config change and the history can be recomputed.
+  # Empty dewar 136.75 kg, from A.P. Colijn on 2026-10-21 ("I believe") - to
+  # be confirmed the next time the dewar is empty.
+  #
+  # Alarms on ln2_mass (alarms.yaml); that one can be switched off from the
+  # Control page, for when the dewar is deliberately empty or away.
+  # ------------------------------------------------------------------
+  - {name: ln2_gross, device: scale, phys: gross, kind: weight, unit: kg, on_pid: false,
+     description: "LN2 dewar scale, gross weight (dewar + LN2)"}
+  - {name: ln2_mass, device: scale, phys: ln2, kind: weight, unit: kg, on_pid: false,
+     offset: 136.75,
+     description: "LN2 in the dewar: gross minus the empty dewar (136.75 kg)"}
+  - {name: ln2_scale_mains, device: scale, phys: mains, kind: status, unit: bool, on_pid: false,
+     description: "1 when the scale indicator runs on mains, 0 on its own battery"}
+
+  # ------------------------------------------------------------------
   # Derived (§7.5). Not read from hardware; computed by devices/derived.py.
   # ------------------------------------------------------------------
   - {name: fm101_total, device: derived, phys: "integrate:fm101", kind: voltage, unit: g,

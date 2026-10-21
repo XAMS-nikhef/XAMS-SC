@@ -255,10 +255,10 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 .\tools\install_services.ps1
 ```
 
-It downloads NSSM 2.24 into `tools\installers\` and installs nine services,
+It downloads NSSM 2.24 into `tools\installers\` and installs the services,
 each started at boot and restarted on a crash, running as `LocalSystem`:
 `XAMS-sinks`, `XAMS-cdaq`, `XAMS-caen`, `XAMS-lakeshore`, `XAMS-ups`,
-`XAMS-turbo`, `XAMS-derived`, `XAMS-alarms`, `XAMS-webui`. It also builds this manual (§6).
+`XAMS-turbo`, `XAMS-rga`, `XAMS-scale`, `XAMS-derived`, `XAMS-alarms`, `XAMS-webui`. It also builds this manual (§6).
 Idempotent: re-running updates the services in place.
 
 | Option | |
