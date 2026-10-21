@@ -150,7 +150,9 @@
             <span class="dim">{{ bits.on|join(', ') or 'no named bit set' }}</span>
           {% else %}—{% endif %}</td></tr>
   </table>
-  {% if emis.get('note') %}<div class="flash bad" style="margin-top:.6rem">Emission {{ emis.get('note') }}</div>{% endif %}
+  {# Kept for an hour by the service, then gone (the audit log keeps it).
+     The idle switch-off is routine and shown as information, not in red. #}
+  {% if emis.get('note') %}<div class="flash {{ 'dim' if emis.get('note_routine') else 'bad' }}" style="margin-top:.6rem">Emission {{ emis.get('note') }}</div>{% endif %}
 </div>
 </div>
 
@@ -229,7 +231,7 @@
     {% elif not em_on and em_why and emission_on %}<span class="{{ 'bad' if 'limit' in em_why else '' }}">{{ em_why }}</span>{% endif %}
   </div>
   {% endif %}
-  {% if emi.get('note') %}<div class="flash bad" style="margin-top:.4rem">EM {{ emi.get('note') }}</div>{% endif %}
+  {% if emi.get('note') %}<div class="flash {{ 'dim' if emi.get('note_routine') else 'bad' }}" style="margin-top:.4rem">EM {{ emi.get('note') }}</div>{% endif %}
 
   <h3>Scan</h3>
   {% if info.recipe_error %}<p class="bad">{{ info.recipe_error }}</p>{% endif %}

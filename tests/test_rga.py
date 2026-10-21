@@ -780,6 +780,29 @@ class TestTheWatchdog:
         service.read()
         assert not analyser["device"].emission
 
+    def test_the_idle_note_is_routine_and_does_not_stay_for_ever(
+            self, monkeypatch, tmp_path, analyser):
+        """21 October 2026: "switched off ... no scan or command for 60 min"
+        stayed on the RGA page until somebody next touched the emission."""
+        from xams_sc.devices import rga as rga_module
+        service = self.on(monkeypatch, tmp_path, analyser)
+        p105(service, 2e-5)
+        service._last_activity -= 3601
+        service.read()
+        info = service.bus.last_json("xams/rga/info")["emission"]
+        assert "no scan or command" in info["note"] and info["note_routine"]
+
+        text, t, routine = service._notes["emission"]
+        service._notes["emission"] = (text, t - rga_module.NOTE_KEEP_S - 1, routine)
+        service.read()
+        assert service.bus.last_json("xams/rga/info")["emission"]["note"] is None
+
+    def test_a_guard_note_is_not_routine(self, monkeypatch, tmp_path, analyser):
+        service = self.on(monkeypatch, tmp_path, analyser)
+        p105(service, 7e-4)
+        service.read()
+        assert not service.bus.last_json("xams/rga/info")["emission"]["note_routine"]
+
     def test_control_is_not_given_up_while_emission_is_on(self, monkeypatch, tmp_path, analyser):
         service = self.on(monkeypatch, tmp_path, analyser)
         p105(service, 2e-5)
