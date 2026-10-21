@@ -27,6 +27,12 @@ page is the *what*.
 
 ::: xams_sc.devices.turbo
 
+::: xams_sc.devices.scale
+
+::: xams_sc.devices.rga
+
+::: xams_sc.devices.prismapro
+
 ::: xams_sc.devices.derived
 
 ::: xams_sc.devices.serial_id

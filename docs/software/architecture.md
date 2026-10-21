@@ -25,11 +25,13 @@ full argument and the decisions that were rejected.
   Lake Shore  ──▶  lakeshore ─┼─▶  xams/meas/<channel>  ─────┼─▶  alarms ──▶ SMS / email
   APC UPS     ──▶  ups       ─┤    (retained)                │
   HiPace 80   ──▶  turbo     ─┤    (listen-only tap)         │
+  PrismaPro   ──▶  rga       ─┤    (Ethernet, HTTP)          │
+  LN₂ scale   ──▶  scale     ─┤    (RS-232, queries only)    │
                    derived   ─┘                              └─▶  webui ──▶ browser
                                                                    Grafana ◀── PostgreSQL
 ```
 
-Nine processes, each started and stopped by
+Eleven processes, each started and stopped by
 [`xams-ctl`](../reference/cli.md). Every one of them is an ordinary Python
 process with no state worth preserving — except `derived`, which is the one
 exception and says so loudly.
@@ -42,6 +44,8 @@ exception and says so loudly.
 | `lakeshore` | the 335 temperature controller |
 | `ups` | mains and battery state |
 | `turbo` | HiPace 80 turbo status and speed, listening on its RS-485 link — never transmits |
+| `rga` | PrismaPro residual gas analyser: status channels, control, scans, emission ([RGA](../drivers/rga.md)) |
+| `scale` | LN₂ dewar scale: gross weight, LN₂ mass, mains — queries only ([LN₂ scale](../drivers/scale.md)) |
 | `derived` | the flow integrator — **the only stateful service** |
 | `alarms` | evaluation, notification, flight recorder |
 | `webui` | the pages, and this manual |

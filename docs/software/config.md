@@ -48,9 +48,9 @@ One entry per channel. Only `name`, `device`, `phys` and `kind` are required.
 | Field | |
 |---|---|
 | `name` | **the identity of the measurement.** MQTT topic, archive record, database row, UI label. Renaming one breaks history |
-| `device` | which service reads it: `cdaq`, `hv_1`, `hv_2`, `lakeshore`, `ups`, `turbo`, `derived` |
+| `device` | which service reads it: `cdaq`, `hv_1`, `hv_2`, `lakeshore`, `ups`, `turbo`, `rga`, `scale`, `derived` |
 | `phys` | where it is, in that device's own terms — a module alias and line, an HV channel index, a HID usage, a Pfeiffer parameter number |
-| `kind` | `voltage` · `rtd` · `temperature` · `hv_vmon` · `hv_imon` · `hv_stat` · `hv_vset` · `status` · `power` · `setpoint` · `current` |
+| `kind` | `voltage` · `rtd` · `temperature` · `hv_vmon` · `hv_imon` · `hv_stat` · `hv_vset` · `status` · `power` · `setpoint` · `current` · `weight` |
 | `unit` | engineering unit as published. Declared, never inferred |
 | `offset`, `multiplier` | the scaling, in that order. Default 0 and 1 |
 | `sign` | `+1` or `-1`. Applied to the unsigned magnitudes the CAEN supplies report |
