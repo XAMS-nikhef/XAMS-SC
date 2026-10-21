@@ -67,9 +67,8 @@ class TestTaskBuilding:
 
     def test_connected_modules_all_present(self, service):
         aliases = {m.alias for m in service._modules}
-        # 9226 is absent: its readout unit failed on 28 September 2026 and
-        # all its channels are disabled.
-        assert aliases == {"9207", "9216_1"}
+        # 9226 back since its repair (October 2026): tt201, tt203-tt207.
+        assert aliases == {"9207", "9216_1", "9226"}
 
     def test_channels_are_ordered_by_physical_index(self, service):
         """Read order must match the order channels were added to the task,
@@ -95,13 +94,16 @@ class TestTaskBuilding:
         On 13 October 2026 the PKR gauge signal was wired to ai7 (p105_v),
         the flow meter having moved to ai6. p105 itself is derived from it
         and is not a task line.
+
+        On 21 October 2026 the repaired 9226 came back: tt201, tt203-tt207
+        (tt202 stays off until its sensor is replaced), +6.
         """
         total = sum(len(m.channels) for m in service._modules)
-        assert total == 16
+        assert total == 22
         kinds = [c.kind for m in service._modules for c in m.channels]
         assert kinds.count("voltage") == 7
         assert kinds.count("current") == 2
-        assert kinds.count("rtd") == 7
+        assert kinds.count("rtd") == 13          # 7 PT100 + 6 PT1000
 
     def test_failed_sensor_is_not_read(self, config, service):
         """tt202 is disabled, so no task should reference 9226/ai1."""

@@ -16,6 +16,25 @@ most noticeable.
 
 ---
 
+## Slow modules read in the background (21 October 2026)
+
+The modules are read on demand, one task each. The RTD modules (9216, 9226)
+take seconds per read. Polled in the same 1-s loop as the 9207 they left fewer
+pressure readings in each 10-s mean: when the repaired 9226 was enabled again,
+p102 / p103 / p104 went from 1.5 / 3.8 / 3.1 mV to 5.1 / 12.4 / 11.2 mV of
+noise, and back to normal with the module in the chassis but not read. Neither
+the RTD cabling nor the module's presence was the cause.
+
+A module with `background: true` in `devices.yaml` is therefore read in its own
+thread every `interval_s` seconds (5 s for the RTD modules); its readings are
+handed to the next 1-s read and published with the rest. The 9207 stays in the
+loop. A background module that fails (pulled, broken) publishes `quality=error`
+for its own channels only; the pressures carry on.
+
+Every ten minutes the log says how long each module's read takes
+(`read time per module: ...`), so a slow module shows itself there rather than
+as noise.
+
 ## The slot map
 
 | Alias | Module | Slot | Reads | Channels |
