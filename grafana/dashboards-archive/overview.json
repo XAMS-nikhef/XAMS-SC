@@ -15,7 +15,7 @@
       }
     ]
   },
-  "description": "Temperatures, pressures, flow and high voltage. The live dashboard is owned by Grafana and edited in the UI; grafana/dashboards-archive/ is the copy git tracks (tools/save_dashboard.py --save / --load, see DESIGN.md section 12). Time series are bucketed with $__timeGroupAlias: channels read by different services land on different timestamps, and without bucketing Grafana's long-to-wide pivot produces a frame that is ~50% NULL, so nothing renders at all. Every time-series panel sets a min interval of 10s and maxDataPoints 3000, which is what holds the plots at one point per 10 s - the rate values are actually stored at - out to 8.3 hours, after which the bucket widens on its own. No threshold lines: thresholds live in alarms.yaml and drawing them here would duplicate the number (section 11).",
+  "description": "Temperatures, pressures, flow, the LN2 dewar and high voltage. The live dashboard is owned by Grafana and edited in the UI; grafana/dashboards-archive/ is the copy git tracks (tools/save_dashboard.py --save / --load, see DESIGN.md section 12). Time series are bucketed with $__timeGroupAlias: channels read by different services land on different timestamps, and without bucketing Grafana's long-to-wide pivot produces a frame that is ~50% NULL, so nothing renders at all. Every time-series panel sets a min interval of 10s and maxDataPoints 3000, which is what holds the plots at one point per 10 s - the rate values are actually stored at - out to 8.3 hours, after which the bucket widens on its own. No threshold lines: thresholds live in alarms.yaml and drawing them here would duplicate the number (section 11).",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -652,6 +652,119 @@
       ],
       "title": "Flow (fm101) — mass flow",
       "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "xams-postgres"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "showValues": false,
+            "spanNulls": 45000,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "masskg"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "id": 11,
+      "interval": "10s",
+      "maxDataPoints": 3000,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "13.2.2",
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "xams-postgres"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(t, $__interval), channel AS metric, avg(value) AS value FROM meas WHERE channel = 'ln2_mass' AND quality = 'ok' AND $__timeFilter(t) GROUP BY 1, 2 ORDER BY 1",
+          "refId": "A",
+          "sql": {
+            "columns": [
+              {
+                "parameters": [],
+                "type": "function"
+              }
+            ],
+            "groupBy": [
+              {
+                "property": {
+                  "type": "string"
+                },
+                "type": "groupBy"
+              }
+            ],
+            "limit": 50
+          }
+        }
+      ],
+      "title": "LN₂ dewar — mass (SG401)",
+      "type": "timeseries",
+      "description": "LN2 in the dewar: the scale reading minus the empty dewar (ln2_mass, offset in channels.yaml). Warning below 100 kg, alarm below 20 kg - in alarms.yaml, not drawn here."
     },
     {
       "datasource": {

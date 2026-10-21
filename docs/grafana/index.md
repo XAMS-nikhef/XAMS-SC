@@ -18,7 +18,7 @@ panel, which is worth remembering before editing one.
 
 ## What is on the Overview dashboard
 
-Ten panels, seven of them time series:
+Eleven panels, eight of them time series:
 
 | Panel | Selects | Unit |
 |---|---|---|
@@ -27,6 +27,7 @@ Ten panels, seven of them time series:
 | Pressures | `pmain`, `p101`–`p104` | bar |
 | Vacuum — P105 (PKR) and turbo speed | `p105` (left, **log** axis), `turbo_speed` (right, dashed) | mbar (always, as `1.5e-2`), Hz |
 | Flow (fm101) — mass flow | `fm101` | g/min |
+| LN₂ dewar — mass (SG401) | `ln2_mass` (scale minus the empty dewar) | kg |
 | High voltage — VMON (signed) | `hv_%_vmon` | V |
 | High voltage — IMON | `hv_%_imon` | µA |
 | Active alarms | latest state per channel, anything not `ok` | |
