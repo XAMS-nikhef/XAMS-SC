@@ -69,7 +69,8 @@ xams-sc/
 │   │   ├── caen.py
 │   │   ├── lakeshore.py
 │   │   ├── ups.py
-│   │   └── turbo.py             HiPace 80, listen-only RS-485 tap (§7.4a)
+│   │   ├── turbo.py             HiPace 80, listen-only RS-485 tap (§7.4a)
+│   │   └── scale.py             LN2 dewar scale, RS-232, queries only
 │   ├── sinks/
 │   │   ├── __main__.py          one process runs them all (§9.4b: one lock)
 │   │   ├── pg_writer.py         PostgreSQL — measurements
@@ -276,7 +277,7 @@ One entry per channel. Schema:
 | Key | Required | Meaning |
 |---|---|---|
 | `name` | yes | channel identity (§3) |
-| `device` | yes | `cdaq` / `hv_1` / `hv_2` / `lakeshore` / `ups` / `turbo` |
+| `device` | yes | `cdaq` / `hv_1` / `hv_2` / `lakeshore` / `ups` / `turbo` / `rga` / `scale` |
 | `phys` | yes | physical address, e.g. `9207/ai5`, or HV channel index |
 | `kind` | yes | `voltage` / `current` / `rtd` / `hv_vmon` / `hv_imon` / `temperature` / `status` |
 | `unit` | yes | engineering unit string |

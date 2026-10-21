@@ -1,21 +1,28 @@
 # XAMS Slow Control
 
 Monitoring and convenience control of the XAMS slow-control hardware: one NI
-cDAQ-9174 chassis, two CAEN DT1470ET high-voltage supplies, a Lake Shore 335
-and a UPS. Storage, plotting, alarming and a small web UI.
+cDAQ-9174 chassis, two CAEN DT1470ET high-voltage supplies, a Lake Shore 335,
+a UPS, the HiPace 80 turbo pump (listened to, never written), the PrismaPro
+residual gas analyser and the LN₂ dewar scale. Storage, plotting, alarming and
+a small web UI.
 
 **Current state: milestone 7 largely complete, milestone 8 in progress — the
-Lake Shore and the HV write paths are built — milestone 3 partial.** The cDAQ,
-both CAEN supplies, the Lake Shore and the UPS are read and logged on the lab PC — 45 channels — with alarms, SMS and email
-notification, the flow integrator, a week of imported LabVIEW history, a web UI
-and a live P&I mimic.
+Lake Shore, HV and RGA write paths are built — milestone 3 partial.** All seven
+instruments are read and logged on the lab PC — 85 enabled channels — with
+alarms, SMS and email notification, the flow integrator, a week of imported
+LabVIEW history, a web UI and a live P&I mimic.
 
-**The system reads everything and controls what needs controlling.** Two
+**The system reads everything and controls what needs controlling.** Three
 instruments actuate:
 
 - **Lake Shore 335** — setpoint and heater range, output 1.
 - **Both CAEN DT1470ET supplies** — `VSET` per channel, and energising a
   channel on or off.
+- **PrismaPro RGA** — taking control, scans, emission and electron
+  multiplier, behind the p105 guard ([RGA](drivers/rga.md)).
+
+The cDAQ, the UPS, the turbo and the LN₂ scale are read only; the scale's
+driver can send queries and nothing else ([LN₂ scale](drivers/scale.md)).
 
 Every write is validated against `channels.yaml`, **read back from the
 instrument** before it counts as successful, acknowledged on `xams/ack/#` and
@@ -63,12 +70,20 @@ are all subscribers, so any of them can be added or replaced without touching
 a driver.
 
 ```
-  cdaq ─┐
-  caen ─┤                    ┌─► jsonl_writer ──► data/raw/*.jsonl   the archive
-  ls335 ┼─► MQTT (mosquitto) ┼─► pg_writer ─────► PostgreSQL ──► Grafana
-  ups  ─┤                    ├─► alarm engine ──► SMS / email
-  turbo┘                    └─► web UI (FastAPI, 127.0.0.1:8000)
+  cdaq      ─┐
+  caen      ─┤
+  lakeshore ─┤                         ┌─► sinks ──► data/raw/*.jsonl   the archive
+  ups       ─┤                         │           PostgreSQL ──► Grafana
+  turbo     ─┼─► MQTT (mosquitto) ─────┼─► alarms ─► SMS / email
+  rga       ─┤                         │
+  scale     ─┤                         └─► webui (FastAPI, 127.0.0.1:8000)
+  derived   ─┘   (flow integrator,          pages, P&I, this manual
+                  computed from fm101)
 ```
+
+Commands go the other way: the web UI or `xams-ctl` publishes on
+`xams/cmd/…`, the service that owns the instrument validates, writes, reads
+back and answers on `xams/ack/…` ([Topic contract](software/topics.md)).
 
 **The files are the truth; the database is an index over them.** If PostgreSQL
 is lost, replay the archive into a new one. Nothing in any driver changes.

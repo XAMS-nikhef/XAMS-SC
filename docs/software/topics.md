@@ -25,10 +25,13 @@ Source: [the design specification](../DESIGN.md) §3 and `src/xams_sc/bus.py`.
 | `xams/rga/info` | the RGA's identity, controlling client and acquisition, JSON; for the RGA page, never archived ([RGA](../drivers/rga.md)) | **yes** |
 | `xams/rga/scan` | the latest scan of a running RGA acquisition, JSON; for the live plot, never archived | **yes** |
 | `xams/rga/saved` | the summary of one RGA Save, for `rga_summary` | no |
+| `xams/status/limits` | the alarm thresholds in force, JSON ([alarms](alarms.md)) | **yes** |
+| `xams/status/notify` | the master alarm switch: on/off, by, at | **yes** |
+| `xams/status/armed` | every switchable alarm's own switch (alarms.yaml `switchable`) | **yes** |
 
 `<channel>` is a name from [`channels.yaml`](config.md). `<service>` is a
-service name — `cdaq`, `caen`, `lakeshore`, `ups`, `turbo`, `derived`, `sinks`,
-`alarms`, `webui`.
+service name — `cdaq`, `caen`, `lakeshore`, `ups`, `turbo`, `rga`, `scale`,
+`derived`, `sinks`, `alarms`, `webui`.
 
 **Retained is a deliberate choice, not a default.** It is what lets a page, a
 report or a newly started service know the current state of the plant the
@@ -124,7 +127,7 @@ worse than a gap (§1, principle 4).
 ## Commands and acknowledgements
 
 Every topic that makes an instrument *do* something has an acknowledgement
-beside it. There are ten, and the list is short on purpose (§10, §10a).
+beside it, and the list is short on purpose (§10, §10a).
 
 | Command | Acknowledgement | What it does |
 |---|---|---|
@@ -132,12 +135,16 @@ beside it. There are ten, and the list is short on purpose (§10, §10a).
 | `xams/cmd/lakeshore/range` | `xams/ack/lakeshore/range` | heater range, output 1 |
 | `xams/cmd/caen/vset` | `xams/ack/caen/vset` | one HV setpoint |
 | `xams/cmd/caen/output` | `xams/ack/caen/output` | energise or de-energise one HV channel |
+| `xams/cmd/caen/clear` | `xams/ack/caen/clear` | clear a latched trip on one supply |
 | `xams/cmd/derived/flow_reset` | `xams/ack/derived/flow_reset` | close the flow period, open a new one |
 | `xams/cmd/all/reload` | `xams/ack/<service>/reload` | re-read the YAML |
 | `xams/cmd/rga/control` | `xams/ack/rga/control` | take or release the RGA (`force` only when an operator chose it) |
 | `xams/cmd/rga/scan` | `xams/ack/rga/scan` | start a recipe, or stop the scan |
 | `xams/cmd/rga/save` | `xams/ack/rga/save` | write the last acquisition to its file |
 | `xams/cmd/rga/emission` | `xams/ack/rga/emission` | RGA emission On or Off; On only past the p105 guard |
+| `xams/cmd/rga/em` | `xams/ack/rga/em` | RGA electron multiplier On or Off |
+| `xams/cmd/alarms/notify` | `xams/ack/alarms/notify` | the master alarm switch (delivery only) |
+| `xams/cmd/alarms/arm` | `xams/ack/alarms/arm` | one switchable alarm on or off (delivery only) |
 
 **The rules that apply to all of them:**
 
