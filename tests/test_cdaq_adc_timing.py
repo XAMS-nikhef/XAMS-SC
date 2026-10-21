@@ -3,8 +3,8 @@
 Read in the background, p102-p104 were still about twice the morning noise:
 the 9226 converting disturbs the 9207 itself. It is now read every 10 s with
 the high-speed ADC timing mode. What is pinned: the config asks for that, an
-unknown mode is refused at start, the mode is set on every channel, and a
-module that refuses the mode keeps its temperatures with the default.
+unknown mode is refused at start, the mode is set on all channels at once, and a
+module that will not start with it is rebuilt without, so it still reads.
 """
 
 import enum
@@ -22,24 +22,48 @@ class Mode(enum.Enum):
     HIGH_SPEED = 2
 
 
-class Chan:
-    def __init__(self, refuse=False):
-        self.refuse, self._mode = refuse, None
+class All:
+    """`task.ai_channels.all`: one property set for every channel at once."""
+    def __init__(self, task):
+        self.task = task
 
     @property
     def ai_adc_timing_mode(self):
-        return self._mode
+        return self.task.mode
 
     @ai_adc_timing_mode.setter
     def ai_adc_timing_mode(self, v):
-        if self.refuse:
-            raise RuntimeError("-200077 requested value is not supported")
-        self._mode = v
+        self.task.mode = v
+
+
+class Channels:
+    def __init__(self, task):
+        self.all = All(task)
 
 
 class Task:
-    def __init__(self, n, refuse=False):
-        self.ai_channels = [Chan(refuse) for _ in range(n)]
+    """Refuses to START with a mode, as the 9226 did with high speed set
+    channel by channel (-200106, 21 October 2026)."""
+    def __init__(self, refuse_mode=False):
+        self.mode, self.refuse_mode = None, refuse_mode
+        self.started = self.closed = False
+        self.ai_channels = Channels(self)
+
+    def start(self):
+        if self.refuse_mode and self.mode is not None:
+            raise RuntimeError("-200106 Property must have the same value for all channels")
+        self.started = True
+
+    def close(self):
+        self.closed = True
+
+
+def service():
+    return CdaqService(load(), RecordingBus(), simulate=False)
+
+
+def mod9226():
+    return ModuleTask("9226", "NI9226", [], adc_timing="high_speed")
 
 
 def test_the_9226_is_read_every_10_s_at_high_speed():
@@ -58,17 +82,27 @@ def test_an_unknown_mode_is_refused_at_start(monkeypatch):
         CdaqService(cfg, RecordingBus(), simulate=False)
 
 
-def test_the_mode_is_set_on_every_channel():
-    task = Task(6)
-    CdaqService._set_adc_timing(ModuleTask("9226", "NI9226", [], adc_timing="high_speed"),
-                                task, Mode)
-    assert all(c.ai_adc_timing_mode is Mode.HIGH_SPEED for c in task.ai_channels)
+def test_the_mode_is_set_on_all_channels_at_once_and_the_task_started():
+    task = Task()
+    out = service()._start_task(mod9226(), task, Mode)
+    assert out is task and task.started and task.mode is Mode.HIGH_SPEED
 
 
-def test_a_refused_mode_keeps_the_default(caplog):
-    task = Task(2, refuse=True)
-    CdaqService._set_adc_timing(ModuleTask("9226", "NI9226", [], adc_timing="high_speed"),
-                                task, Mode)                 # does not raise
+def test_a_module_without_a_mode_is_started_untouched():
+    task = Task()
+    out = service()._start_task(ModuleTask("9207", "NI9207", []), task, Mode)
+    assert out is task and task.started and task.mode is None
+
+
+def test_a_task_that_will_not_start_with_the_mode_is_rebuilt_without(monkeypatch, caplog):
+    """The failure of 21 October: the mode made the task refuse to start and
+    every cDAQ reading went down. Now the temperatures come up regardless."""
+    svc = service()
+    first, second = Task(refuse_mode=True), Task(refuse_mode=True)
+    monkeypatch.setattr(svc, "_new_task", lambda mod: second)
+    out = svc._start_task(mod9226(), first, Mode)
+    assert first.closed and not first.started
+    assert out is second and second.started and second.mode is None
     assert "refused" in caplog.text
 
 

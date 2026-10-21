@@ -44,7 +44,16 @@ time; the 9216 does not. The 9226 is therefore read every 10 s with
 of its 6 channels), so it spends far less of the time converting. The
 resolution lost does not matter for the PT1000s. `adc_timing` takes
 `high_speed`, `high_resolution` or `automatic`; an unknown value stops the
-service at start, a mode the module refuses is logged and the default kept.
+service at start.
+
+The first deployment set the mode channel by channel. DAQmx wants it the same
+on every channel of a module at once (-200106, "Property must have the same
+value for all channels on this device"), so the 9226 task would not start and
+the whole cDAQ service stopped (13:08, ~30 s without cDAQ readings, until the
+old `devices.yaml` was put back). The mode is now set on all channels in one
+go (`task.ai_channels.all`), and a task that still will not start with it is
+rebuilt without the mode and started with the default, with a warning in the
+log: a slower conversion never costs the readings.
 
 ## The slot map
 
