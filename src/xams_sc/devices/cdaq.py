@@ -266,54 +266,16 @@ class CdaqService(BaseService):
 
     def _open_tasks(self) -> bool:
         """Create one on-demand task per module. Returns False on a clean failure."""
-        import nidaqmx
-        from nidaqmx.constants import (ADCTimingMode, CurrentShuntResistorLocation, CurrentUnits,
-                                       ExcitationSource, ResistanceConfiguration,
-                                       RTDType, TemperatureUnits)
+        from nidaqmx.constants import ADCTimingMode
 
         for mod in self._modules:
             try:
-                task = nidaqmx.Task(new_task_name=f"xams_{mod.alias}")
-                for ch in mod.channels:
-                    if ch.kind == "rtd":
-                        rtd = ch.rtd or {}
-                        excit = EXCITATION_A.get(mod.model)
-                        if excit is None:
-                            log.critical("FATAL: no excitation current known for "
-                                         "module model %r (%s)", mod.model, mod.alias)
-                            return False
-                        task.ai_channels.add_ai_rtd_chan(
-                            ch.phys,
-                            rtd_type=getattr(RTDType, RTD_TYPES[rtd["type"]]),
-                            resistance_config=getattr(
-                                ResistanceConfiguration, WIRING[int(rtd.get("wiring", 3))]),
-                            current_excit_source=ExcitationSource.INTERNAL,
-                            current_excit_val=excit,
-                            r_0=float(rtd["r0"]),
-                            units=TemperatureUnits.DEG_C,
-                        )
-                    elif ch.kind == "voltage":
-                        task.ai_channels.add_ai_voltage_chan(ch.phys)
-                    elif ch.kind == "current":
-                        # Range given explicitly rather than left to DAQmx.
-                        # See CURRENT_RANGE_A for why it is 21 mA and not the
-                        # module's full span. The shunt is internal to the
-                        # module; there is no external resistor to declare.
-                        task.ai_channels.add_ai_current_chan(
-                            ch.phys,
-                            min_val=CURRENT_RANGE_A[0],
-                            max_val=CURRENT_RANGE_A[1],
-                            units=CurrentUnits.AMPS,
-                            shunt_resistor_loc=CurrentShuntResistorLocation.INTERNAL,
-                        )
-                    else:
-                        log.critical("FATAL: channel %s has kind %r, which this "
-                                     "service cannot read", ch.name, ch.kind)
-                        return False
-                if mod.adc_timing is not None:
-                    self._set_adc_timing(mod, task, ADCTimingMode)
+                task = self._new_task(mod)
+                if task is None:
+                    self._close_tasks()
+                    return False
                 # No timing configured: on-demand, software-timed reads (§7.1).
-                task.start()
+                task = self._start_task(mod, task, ADCTimingMode)
                 mod.task = task
                 log.info("task for %s ready (%d channels)", mod.alias, len(mod.channels))
             except Exception as exc:
@@ -330,19 +292,86 @@ class CdaqService(BaseService):
         self._start_background()
         return True
 
-    @staticmethod
-    def _set_adc_timing(mod: ModuleTask, task, modes) -> None:
-        """Set the ADC timing mode on every channel of the task. A mode the
-        module refuses is logged and the DAQmx default kept: a slower
-        conversion is no reason to lose the temperatures."""
-        mode = getattr(modes, ADC_TIMING[mod.adc_timing])
+    def _new_task(self, mod: ModuleTask):
+        """A DAQmx task with the module's channels added, not started. None
+        on a configuration this service cannot read (logged as FATAL)."""
+        import nidaqmx
+        from nidaqmx.constants import (CurrentShuntResistorLocation, CurrentUnits,
+                                       ExcitationSource, ResistanceConfiguration,
+                                       RTDType, TemperatureUnits)
+
+        task = nidaqmx.Task(new_task_name=f"xams_{mod.alias}")
+        for ch in mod.channels:
+            if ch.kind == "rtd":
+                rtd = ch.rtd or {}
+                excit = EXCITATION_A.get(mod.model)
+                if excit is None:
+                    log.critical("FATAL: no excitation current known for "
+                                 "module model %r (%s)", mod.model, mod.alias)
+                    task.close()
+                    return None
+                task.ai_channels.add_ai_rtd_chan(
+                    ch.phys,
+                    rtd_type=getattr(RTDType, RTD_TYPES[rtd["type"]]),
+                    resistance_config=getattr(
+                        ResistanceConfiguration, WIRING[int(rtd.get("wiring", 3))]),
+                    current_excit_source=ExcitationSource.INTERNAL,
+                    current_excit_val=excit,
+                    r_0=float(rtd["r0"]),
+                    units=TemperatureUnits.DEG_C,
+                )
+            elif ch.kind == "voltage":
+                task.ai_channels.add_ai_voltage_chan(ch.phys)
+            elif ch.kind == "current":
+                # Range given explicitly rather than left to DAQmx.
+                # See CURRENT_RANGE_A for why it is 21 mA and not the
+                # module's full span. The shunt is internal to the
+                # module; there is no external resistor to declare.
+                task.ai_channels.add_ai_current_chan(
+                    ch.phys,
+                    min_val=CURRENT_RANGE_A[0],
+                    max_val=CURRENT_RANGE_A[1],
+                    units=CurrentUnits.AMPS,
+                    shunt_resistor_loc=CurrentShuntResistorLocation.INTERNAL,
+                )
+            else:
+                log.critical("FATAL: channel %s has kind %r, which this "
+                             "service cannot read", ch.name, ch.kind)
+                task.close()
+                return None
+        return task
+
+    def _start_task(self, mod: ModuleTask, task, modes):
+        """Start the task, with the module's ADC timing mode if it has one.
+
+        DAQmx wants the mode the same on every channel of a module at once:
+        set channel by channel, the 9226 refused at the third and then would
+        not start at all (-200106, 21 October 2026), which took every cDAQ
+        reading down. So the mode is set on all channels in one go, and if the
+        task still will not start with it, it is rebuilt without: a slower
+        conversion is no reason to lose the temperatures, let alone the
+        pressures. Returns the started task.
+        """
+        if mod.adc_timing is None:
+            task.start()
+            return task
         try:
-            for chan in task.ai_channels:
-                chan.ai_adc_timing_mode = mode
+            task.ai_channels.all.ai_adc_timing_mode = getattr(modes, ADC_TIMING[mod.adc_timing])
+            task.start()
             log.info("%s: ADC timing mode %s", mod.alias, mod.adc_timing)
+            return task
         except Exception as exc:
-            log.warning("%s: ADC timing mode %s refused (%s); keeping the default",
+            log.warning("%s: ADC timing mode %s refused (%s); started with the default",
                         mod.alias, mod.adc_timing, exc)
+            try:
+                task.close()
+            except Exception:
+                pass
+        task = self._new_task(mod)
+        if task is None:
+            raise RuntimeError(f"{mod.alias}: could not rebuild the task")
+        task.start()
+        return task
 
     # ------------------------------------------------------------ background
 
