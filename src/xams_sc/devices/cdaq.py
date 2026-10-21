@@ -119,8 +119,22 @@ class ModuleTask:
     # (devices.yaml `background`, `interval_s`). See the module docstring.
     background: bool = False
     interval_s: float = 5.0
+    # DAQmx ADC timing mode for every channel of the module (devices.yaml
+    # `adc_timing`), or None for the DAQmx default. See ADC_TIMING.
+    adc_timing: str | None = None
     # Read durations since the last report: (count, total seconds, max).
     timing: list = field(default_factory=lambda: [0, 0.0, 0.0])
+
+# devices.yaml `adc_timing` -> nidaqmx.constants.ADCTimingMode member.
+# 21 October 2026: the 9226 in its default (high resolution) mode converts for
+# 1.2 s per read of 6 channels, and while it converts p102-p104 on the 9207 are
+# 2-3x noisier. High speed shortens the conversion; the resolution lost does
+# not matter for the PT1000s.
+ADC_TIMING = {
+    "high_speed": "HIGH_SPEED",
+    "high_resolution": "HIGH_RESOLUTION",
+    "automatic": "AUTOMATIC",
+}
 
 # How often the read durations per module are logged.
 TIMING_REPORT_S = 600.0
@@ -177,12 +191,17 @@ class CdaqService(BaseService):
             spec = specs.get(alias, {})
             mod = ModuleTask(alias=alias, model=models.get(alias, ""), channels=channels,
                              background=bool(spec.get("background", False)),
-                             interval_s=float(spec.get("interval_s", 5.0)))
+                             interval_s=float(spec.get("interval_s", 5.0)),
+                             adc_timing=spec.get("adc_timing"))
+            if mod.adc_timing is not None and mod.adc_timing not in ADC_TIMING:
+                raise ValueError(f"devices.yaml cdaq module {alias}: adc_timing "
+                                 f"{mod.adc_timing!r} is not one of {sorted(ADC_TIMING)}")
             self._modules.append(mod)
             log.info("module %s (%s): %d enabled channels%s",
                      alias, models.get(alias, "?"), len(channels),
-                     f", read in the background every {mod.interval_s:g} s"
-                     if mod.background else "")
+                     (f", read in the background every {mod.interval_s:g} s"
+                      if mod.background else "")
+                     + (f", ADC timing {mod.adc_timing}" if mod.adc_timing else ""))
 
         skipped = [a for a in models if a not in by_alias]
         if skipped:
@@ -248,7 +267,7 @@ class CdaqService(BaseService):
     def _open_tasks(self) -> bool:
         """Create one on-demand task per module. Returns False on a clean failure."""
         import nidaqmx
-        from nidaqmx.constants import (CurrentShuntResistorLocation, CurrentUnits,
+        from nidaqmx.constants import (ADCTimingMode, CurrentShuntResistorLocation, CurrentUnits,
                                        ExcitationSource, ResistanceConfiguration,
                                        RTDType, TemperatureUnits)
 
@@ -291,6 +310,8 @@ class CdaqService(BaseService):
                         log.critical("FATAL: channel %s has kind %r, which this "
                                      "service cannot read", ch.name, ch.kind)
                         return False
+                if mod.adc_timing is not None:
+                    self._set_adc_timing(mod, task, ADCTimingMode)
                 # No timing configured: on-demand, software-timed reads (§7.1).
                 task.start()
                 mod.task = task
@@ -308,6 +329,20 @@ class CdaqService(BaseService):
                 return False
         self._start_background()
         return True
+
+    @staticmethod
+    def _set_adc_timing(mod: ModuleTask, task, modes) -> None:
+        """Set the ADC timing mode on every channel of the task. A mode the
+        module refuses is logged and the DAQmx default kept: a slower
+        conversion is no reason to lose the temperatures."""
+        mode = getattr(modes, ADC_TIMING[mod.adc_timing])
+        try:
+            for chan in task.ai_channels:
+                chan.ai_adc_timing_mode = mode
+            log.info("%s: ADC timing mode %s", mod.alias, mod.adc_timing)
+        except Exception as exc:
+            log.warning("%s: ADC timing mode %s refused (%s); keeping the default",
+                        mod.alias, mod.adc_timing, exc)
 
     # ------------------------------------------------------------ background
 

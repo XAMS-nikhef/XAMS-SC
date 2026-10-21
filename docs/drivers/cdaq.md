@@ -35,6 +35,17 @@ Every ten minutes the log says how long each module's read takes
 (`read time per module: ...`), so a slow module shows itself there rather than
 as noise.
 
+**Later the same day: the 9226 at 10 s and high speed.** In the background
+the noise only came halfway down (2.6 / 6.3 / 6.0 mV), although the 9207 now
+got *more* readings per mean (~9, against ~5 in the morning with the 9216 in
+the loop). So the 9226 converting disturbs the 9207 itself, beyond the loop
+time; the 9216 does not. The 9226 is therefore read every 10 s with
+`adc_timing: high_speed` (the DAQmx default is high resolution: 1.2 s per read
+of its 6 channels), so it spends far less of the time converting. The
+resolution lost does not matter for the PT1000s. `adc_timing` takes
+`high_speed`, `high_resolution` or `automatic`; an unknown value stops the
+service at start, a mode the module refuses is logged and the default kept.
+
 ## The slot map
 
 | Alias | Module | Slot | Reads | Channels |
