@@ -11,8 +11,7 @@ cdaq:
     - {alias: "9207",   model: NI9207, slot: 1, serial: "020DFD57"}
     - {alias: "9216_1", model: NI9216, slot: 2, serial: "020F64D1", background: true, interval_s: 5}
     - {alias: "9216_2", model: NI9216, slot: 3, serial: "020F64D0", background: true, interval_s: 5}
-    - {alias: "9226",   model: NI9226, slot: 4, serial: "02159CBB", background: true, interval_s: 10,
-       adc_timing: high_speed}
+    - {alias: "9226",   model: NI9226, slot: 4, serial: "02159CBB", background: true, interval_s: 10}
   # `background: true` (21 October 2026): the RTD modules are read in their own
   # thread every `interval_s` seconds instead of in the 1-s loop. An RTD read
   # takes seconds; in the loop it left fewer 9207 readings in each 10-s mean
@@ -23,6 +22,9 @@ cdaq:
   # only by taking loop time. So it is read every 10 s and with `adc_timing:
   # high_speed` (default is high resolution, 1.2 s per read of 6 channels):
   # shorter conversions, less of the time converting. Resolution is not needed.
+  # High speed was REVERTED the same afternoon (user): the temperatures jumped
+  # up and down with it. Back to the DAQmx default (high resolution); the
+  # 10-s interval stays. `adc_timing` remains available per module.
   # RTD excitation current, measured from the hardware 17 Sep 2026. Each module
   # accepts EXACTLY ONE value and neither is the DAQmx default of 2.5 mA, so
   # both must be set explicitly or the task refuses to configure. Kept here for
