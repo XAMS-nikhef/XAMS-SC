@@ -36,10 +36,12 @@
 .control-readings td { overflow-wrap:anywhere; }
 .control-readings .reset-form { flex-wrap:wrap; }
 @media (max-width:600px) { .control-split { grid-template-columns:minmax(0,1fr); } }
-/* A third of a laptop screen is too narrow for readings AND plot side by
-   side, so inside a narrow tile the plot goes under the readings. Measured on
-   the tile, not the window: the tile is what is narrow. */
-@container (max-width:620px) { .control-split { grid-template-columns:minmax(0,1fr); } }
+/* Readings left, plot right, inside each of the three tiles too (21 October
+   2026): the plot takes the larger share. Only a really narrow tile puts the
+   plot under the readings. Measured on the tile, not the window: the tile is
+   what is narrow. */
+.control-pair .control-split { grid-template-columns:minmax(210px,2fr) minmax(0,3fr); }
+@container (max-width:460px) { .control-pair .control-split { grid-template-columns:minmax(0,1fr); } }
 /* THE PLOT BESIDE THE TABLE (14 October 2026): what each supply's channels
    did over the last minutes to hours, next to what they read now. Below the
    table when the window is too narrow to give both room. */
@@ -853,6 +855,22 @@ document.addEventListener('submit', function (e) {
     }).then(function (html) {
       if (!html || busy) return;
       var doc = new DOMParser().parseFromString(html, 'text/html');
+      // NO JUMP (21 October 2026). The server sends the plot legends empty -
+      // the plot script fills them - so a swap shortened the page for a
+      // moment (the Lake Shore legend is two lines), the redraw measured the
+      // layout in that state, and a reader at the BOTTOM of the page was
+      // clamped 21 px up and stayed there. The legends are carried over into
+      // the new markup, and the scroll position is put back if it moved.
+      var y = window.scrollY;
+      var legends = {};
+      document.querySelectorAll('.hv-plot').forEach(function (p) {
+        var leg = p.querySelector('.legend');
+        if (leg) legends[p.dataset.plot || p.dataset.supply] = leg.innerHTML;
+      });
+      doc.querySelectorAll('.hv-plot').forEach(function (p) {
+        var leg = p.querySelector('.legend'), k = p.dataset.plot || p.dataset.supply;
+        if (leg && k in legends) leg.innerHTML = legends[k];
+      });
       LIVE.forEach(function (id) {
         var old = document.getElementById(id), neu = doc.getElementById(id);
         if (!old || !neu) return;
@@ -886,6 +904,7 @@ document.addEventListener('submit', function (e) {
       // The plots sit inside the setpoint form, so a swap made new, blank
       // canvases: draw them again from what was last fetched.
       if (window.hvPlotsRedraw) window.hvPlotsRedraw();
+      if (window.scrollY !== y) window.scrollTo(0, y);
     }).catch(function () { /* keep what is shown; the next round tries again */ });
   }
   (function loop() {
@@ -1146,63 +1165,13 @@ document.addEventListener('submit', function (e) {
 })();
 </script>
 
-<div class="card">
-  <h2>The high-voltage columns, and what this page cannot do</h2>
-  <div class="note">
-    <p><strong>Status</strong> comes from the board's own <code>STAT</code>
-    word, never from the voltage. There are <strong>four</strong> states, and
-    three separate things decide them:</p>
-
-    <ul style="margin:.4rem 0 .6rem 1.1rem;padding:0">
-      <li><strong>disabled</strong> — the front-panel enable switch is off.
-        Nothing in this software can change that, by design (§10a).</li>
-      <li><strong>enabled</strong> — the switch is on, but the output is
-        <em>not energised</em>. Permitted and inert: it will do nothing until
-        it is switched on, which is a command, not the switch.</li>
-      <li><strong>ON 0 V</strong> — energised and sitting at zero. Live, with
-        nothing on it yet.</li>
-      <li><strong>ON</strong> — energised with volts out.</li>
-    </ul>
-
-    <p>A trip, interlock or over-current replaces all four and is shown in
-    red. The distinction between <em>disabled</em> and <em>enabled</em> is the
-    one that matters: flipping the switch does not energise anything, and for
-    a while this page wrongly showed both as "off".</p>
-
-    <p><strong>VMON and IMON</strong> are what the supply is measuring now.
-    Voltages are stored <strong>signed</strong>: the supplies report unsigned
-    magnitudes with polarity as a separate parameter, so the sign is applied
-    in software and the cathode reads negative while the anode reads positive
-    (§7.2). A supply that is off reads 0 and is shown as off, not as a fault.</p>
-
-    <p><strong>MAXV, RUP, RDW, TRIP and POL</strong> are the board's own
-    protection settings, shown from <code>devices.yaml</code>. The software
-    <em>displays</em> them and raises an alarm if the board disagrees with
-    what is recorded — it <strong>cannot change them</strong> (§8.3). Ramp
-    rate, trip current and over-voltage limit live on the instrument, and
-    that is what keeps this software out of the protection path (§10).</p>
-
-    <p><strong>VSET is what the channel was told to hold; VMON is what it is
-    doing.</strong> VSET is written from the boxes above, read back from the
-    board and audited; VMON is only ever read.</p>
-
-    <p><strong>A VSET in red is a disabled channel whose setpoint is not
-    zero.</strong> The enable switch is a hand operation and the board ramps to
-    VSET the moment it is flipped, so a red value is the voltage you would get
-    by touching that switch - with no confirmation and no warning. §10a turns
-    "a disabled channel has VSET 0" into an invariant precisely so that the
-    switch becomes safe to flip; until the setpoints are zeroed it is not.</p>
-
-    <p><strong>What this page cannot do, by design.</strong> It cannot flip a
-    channel's enable switch, and it cannot take a board out of LOCAL - both are
-    hand operations at the supply, and they are the two gates between this
-    software and an electrode (§10a). It cannot change MAXV, RUP, RDW, TRIP or
-    ISET. And it never acts on its own: a restart writes nothing.</p>
-
-    <p>The two units are told apart by asking each board for its own serial
-    number over the wire, never by COM port. Swapping the USB cables is
-    therefore harmless (§6.2).</p>
-  </div>
-</div>
+{# The explanation of the columns and of what this page cannot do lives in
+   the manual, not here: a card of text at the foot of the page was never
+   read (21 October 2026). One line points at it. #}
+<p class="dim" style="margin:1.2rem 0 0 0;font-size:.85rem">
+  What the columns mean, and what this page cannot do by design (enable
+  switch, LOCAL, MAXV, RUP/RDW, TRIP):
+  <a href="/manual/operating/webui/#control-high-voltage">manual → Control: high voltage</a>.
+</p>
 
 {% endblock %}
