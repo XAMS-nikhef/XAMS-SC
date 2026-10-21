@@ -607,10 +607,13 @@ channels:
   #
   # Alarms on ln2_mass (alarms.yaml); that one can be switched off from the
   # Control page, for when the dewar is deliberately empty or away.
+  #
+  # On the P&ID ln2_mass is SG401, a bubble above the N2 vessel added by
+  # tools/build_mimic.py (ADD_INSTRUMENTS); the gross weight is not drawn.
   # ------------------------------------------------------------------
   - {name: ln2_gross, device: scale, phys: gross, kind: weight, unit: kg, on_pid: false,
      description: "LN2 dewar scale, gross weight (dewar + LN2)"}
-  - {name: ln2_mass, device: scale, phys: ln2, kind: weight, unit: kg, on_pid: false,
+  - {name: ln2_mass, device: scale, phys: ln2, kind: weight, unit: kg,
      offset: 136.75,
      description: "LN2 in the dewar: gross minus the empty dewar (136.75 kg)"}
   - {name: ln2_scale_mains, device: scale, phys: mains, kind: status, unit: bool, on_pid: false,

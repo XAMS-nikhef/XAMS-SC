@@ -85,6 +85,14 @@ otherwise read 2.2 times too heavy with nothing looking wrong.
 
 ---
 
+## On the P&ID
+
+`ln2_mass` is **SG401** on the P&I page: a bubble like SG101/SG102 above the
+N₂ vessel, in whole kg. Added at build time by `tools/build_mimic.py`, since
+the drawing does not carry it yet.
+
+---
+
 ## Alarms
 
 On `ln2_mass` (`alarms.yaml`): **warning** (minor, email) below **100 kg**,

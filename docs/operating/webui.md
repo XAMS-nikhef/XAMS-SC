@@ -172,6 +172,14 @@ it. Percent is of full scale, so it answers "how hard is it working" only once
 you know what full scale is; watts is the number to compare against the heat
 load.
 
+### The LN₂ dewar on the drawing
+
+**SG401**, a bubble with the strain-gauge stroke like SG101 and SG102, above the
+N₂ vessel (the LN₂ dewar, with V_dewar): the **net** LN₂ mass in whole kg,
+channel `ln2_mass`. The drawing itself does not have it yet; `tools/build_mimic.py`
+adds it when the mimic is built (`ADD_INSTRUMENTS`, `TAG_ALIASES`). When the
+P&ID is revised with SG401 on it, those two entries go.
+
 ### The turbo on the drawing
 
 The turbo pump's **outline** is coloured by its state, and the speed is written
