@@ -8,6 +8,16 @@ cannot share one hardware-timed task. Slow control reads at 1 Hz, so this uses
 **on-demand (software-timed) reads**, one task per module, polled in sequence.
 The CompactDAQ timing-engine constraint then does not apply.
 
+**Slow modules are read in the background** (`background: true` in
+devices.yaml, 21 October 2026). An RTD read on the 9226 or 9216 takes seconds,
+and polled in the same loop it held up the 9207: fewer pressure readings fell
+into each 10-s mean, and p102-p104 were 3.5x noisier the moment the 9226 was
+enabled again (module in but not read: back to normal). A background module
+gets its own thread, reads at its own `interval_s` and hands its readings to
+the next `read()`; the 9207 keeps its one read per second. How long each
+module's read takes is logged every ten minutes, so the next slow module shows
+itself in the log rather than as noise.
+
 Tasks actually created:
 
     9207     ai0:7 voltage   and ai8:9 current (4-20 mA strain gauges)
@@ -23,7 +33,9 @@ from __future__ import annotations
 
 import logging
 import random
-from dataclasses import dataclass
+import threading
+import time
+from dataclasses import dataclass, field
 
 from ..config import Channel, Config
 from ..model import Measurement, Quality, utcnow
@@ -103,6 +115,15 @@ class ModuleTask:
     model: str
     channels: list[Channel]
     task: object | None = None
+    # Read in its own thread every `interval_s` instead of in the 1-s loop
+    # (devices.yaml `background`, `interval_s`). See the module docstring.
+    background: bool = False
+    interval_s: float = 5.0
+    # Read durations since the last report: (count, total seconds, max).
+    timing: list = field(default_factory=lambda: [0, 0.0, 0.0])
+
+# How often the read durations per module are logged.
+TIMING_REPORT_S = 600.0
 
 
 class CdaqService(BaseService):
@@ -115,6 +136,13 @@ class CdaqService(BaseService):
         self._device_serials: dict[str, str] = {}
         # Log an out-of-range RTD once, not every second.
         self._reported_open: set[str] = set()
+        # Background modules: their readings wait here for the next read().
+        self._bg_lock = threading.Lock()
+        self._bg_pending: list[Measurement] = []
+        self._bg_stop = threading.Event()
+        self._bg_threads: list[threading.Thread] = []
+        self._bg_failed: set[str] = set()
+        self._next_timing_report = time.monotonic() + TIMING_REPORT_S
         self._build_tasks()
 
     # ------------------------------------------------------------------ setup
@@ -127,6 +155,7 @@ class CdaqService(BaseService):
         """
         cfg = self.config.devices.get("cdaq", {})
         models = {m["alias"]: m["model"] for m in cfg.get("modules", [])}
+        specs = {m["alias"]: m for m in cfg.get("modules", [])}
         self._device_serials = {m["alias"]: m.get("serial", "")
                                 for m in cfg.get("modules", [])}
 
@@ -145,11 +174,15 @@ class CdaqService(BaseService):
 
         for alias, channels in sorted(by_alias.items()):
             channels.sort(key=lambda c: int(c.phys.split("/ai")[1]))
-            self._modules.append(
-                ModuleTask(alias=alias, model=models.get(alias, ""), channels=channels)
-            )
-            log.info("module %s (%s): %d enabled channels",
-                     alias, models.get(alias, "?"), len(channels))
+            spec = specs.get(alias, {})
+            mod = ModuleTask(alias=alias, model=models.get(alias, ""), channels=channels,
+                             background=bool(spec.get("background", False)),
+                             interval_s=float(spec.get("interval_s", 5.0)))
+            self._modules.append(mod)
+            log.info("module %s (%s): %d enabled channels%s",
+                     alias, models.get(alias, "?"), len(channels),
+                     f", read in the background every {mod.interval_s:g} s"
+                     if mod.background else "")
 
         skipped = [a for a in models if a not in by_alias]
         if skipped:
@@ -273,9 +306,84 @@ class CdaqService(BaseService):
                 else:
                     log.critical("FATAL: could not configure %s: %s", mod.alias, exc)
                 return False
+        self._start_background()
         return True
 
+    # ------------------------------------------------------------ background
+
+    def _start_background(self) -> None:
+        """One thread per background module, reading at its own interval."""
+        self._bg_stop.clear()
+        for mod in self._modules:
+            if mod.background and mod.task is not None:
+                th = threading.Thread(target=self._background_loop, args=(mod,),
+                                      name=f"cdaq-{mod.alias}", daemon=True)
+                th.start()
+                self._bg_threads.append(th)
+
+    def _stop_background(self) -> None:
+        """Stop the threads BEFORE their tasks are closed under them. The join
+        waits out a read in progress (an RTD read takes seconds)."""
+        self._bg_stop.set()
+        for th in self._bg_threads:
+            th.join(timeout=30.0)
+        self._bg_threads = []
+
+    def _background_loop(self, mod: ModuleTask) -> None:
+        while not self._bg_stop.is_set():
+            t0 = time.monotonic()
+            try:
+                values = self._timed_read(mod)
+                readings = self._convert(mod, values, utcnow())
+                if mod.alias in self._bg_failed:
+                    log.info("%s reads again", mod.alias)
+                    self._bg_failed.discard(mod.alias)
+            except Exception as exc:
+                # The module's own channels are unknown; the rest of the
+                # chassis is unaffected, which is the point of the thread.
+                if mod.alias not in self._bg_failed:
+                    log.error("%s: background read failed: %s. Publishing "
+                              "quality=error for its channels; retrying.", mod.alias, exc)
+                    self._bg_failed.add(mod.alias)
+                now = utcnow()
+                readings = [Measurement(t=now, channel=ch.name, value=None, unit=ch.unit,
+                                        quality=Quality.ERROR) for ch in mod.channels]
+            with self._bg_lock:
+                self._bg_pending.extend(readings)
+            self._bg_stop.wait(max(0.0, mod.interval_s - (time.monotonic() - t0)))
+
+    def _take_background(self) -> list[Measurement]:
+        with self._bg_lock:
+            out, self._bg_pending = self._bg_pending, []
+        return out
+
+    def _timed_read(self, mod: ModuleTask):
+        t0 = time.monotonic()
+        values = mod.task.read()
+        dt = time.monotonic() - t0
+        mod.timing[0] += 1
+        mod.timing[1] += dt
+        mod.timing[2] = max(mod.timing[2], dt)
+        return values
+
+    def _report_timing(self) -> None:
+        """Every TIMING_REPORT_S: how long each module's read takes. A slow
+        module in the 1-s loop is what made the pressures noisy."""
+        if time.monotonic() < self._next_timing_report:
+            return
+        self._next_timing_report = time.monotonic() + TIMING_REPORT_S
+        parts = []
+        for mod in self._modules:
+            n, total, worst = mod.timing
+            if n:
+                parts.append(f"{mod.alias} {total / n:.3f} s (max {worst:.3f}, n={n}"
+                             f"{', background' if mod.background else ''})")
+            mod.timing[:] = [0, 0.0, 0.0]
+        if parts:
+            log.info("read time per module: %s", "; ".join(parts))
+
     def _close_tasks(self) -> None:
+        self._stop_background()
         for mod in self._modules:
             if mod.task is not None:
                 try:
@@ -298,55 +406,63 @@ class CdaqService(BaseService):
         now = utcnow()
         out: list[Measurement] = []
         for mod in self._modules:
-            if mod.task is None:
+            if mod.task is None or mod.background:
                 continue
-            values = mod.task.read()
-            # A single-channel task returns a scalar, not a list.
-            if not isinstance(values, list):
-                values = [values]
-            if len(values) != len(mod.channels):
-                raise RuntimeError(
-                    f"{mod.alias}: read returned {len(values)} values for "
-                    f"{len(mod.channels)} channels")
-            for ch, raw in zip(mod.channels, values):
-                # RTD channels come back in degrees C from DAQmx; their offset
-                # and multiplier default to 0 and 1, so this is a no-op for
-                # them and the real scaling for the voltage channels (§4.2).
-                quality = Quality.OK
-                if ch.kind == "rtd" and not (RTD_VALID_C[0] <= raw <= RTD_VALID_C[1]):
-                    # Report the absence of a measurement, not a number.
-                    quality = Quality.ERROR
-                    if ch.name not in self._reported_open:
-                        log.error(
-                            "%s (%s) reads %.1f C, outside the RTD range %s..%s — "
-                            "open circuit, short, or no sensor. Publishing "
-                            "quality=error, not a temperature.",
-                            ch.name, ch.phys, raw, *RTD_VALID_C)
-                        self._reported_open.add(ch.name)
-                elif ch.kind == "rtd":
-                    self._reported_open.discard(ch.name)
-                elif ch.kind == "current" and not (
-                        CURRENT_VALID_A[0] <= raw <= CURRENT_VALID_A[1]):
-                    # A dead 4-20 mA loop, not a light load. See CURRENT_VALID_A.
-                    quality = Quality.ERROR
-                    if ch.name not in self._reported_open:
-                        log.error(
-                            "%s (%s) reads %.2f mA, outside the 4-20 mA loop range "
-                            "%.1f..%.1f mA — broken loop, unpowered transmitter, or "
-                            "no sensor. Publishing quality=error, not a weight.",
-                            ch.name, ch.phys, raw * 1e3,
-                            CURRENT_VALID_A[0] * 1e3, CURRENT_VALID_A[1] * 1e3)
-                        self._reported_open.add(ch.name)
-                elif ch.kind == "current":
-                    self._reported_open.discard(ch.name)
-
-                out.append(Measurement(
-                    t=now, channel=ch.name,
-                    value=apply(raw, ch.offset, ch.multiplier) if quality is Quality.OK
-                          else None,
-                    unit=ch.unit, raw=raw, quality=quality,
-                ))
+            out.extend(self._convert(mod, self._timed_read(mod), now))
+        # What the background modules have read since the last call.
+        out.extend(self._take_background())
+        self._report_timing()
         out.extend(self._derive_from(out, now))
+        return out
+
+    def _convert(self, mod: ModuleTask, values, now) -> list[Measurement]:
+        """One module's raw values -> measurements, with the validity checks."""
+        # A single-channel task returns a scalar, not a list.
+        if not isinstance(values, list):
+            values = [values]
+        if len(values) != len(mod.channels):
+            raise RuntimeError(
+                f"{mod.alias}: read returned {len(values)} values for "
+                f"{len(mod.channels)} channels")
+        out: list[Measurement] = []
+        for ch, raw in zip(mod.channels, values):
+            # RTD channels come back in degrees C from DAQmx; their offset
+            # and multiplier default to 0 and 1, so this is a no-op for
+            # them and the real scaling for the voltage channels (§4.2).
+            quality = Quality.OK
+            if ch.kind == "rtd" and not (RTD_VALID_C[0] <= raw <= RTD_VALID_C[1]):
+                # Report the absence of a measurement, not a number.
+                quality = Quality.ERROR
+                if ch.name not in self._reported_open:
+                    log.error(
+                        "%s (%s) reads %.1f C, outside the RTD range %s..%s — "
+                        "open circuit, short, or no sensor. Publishing "
+                        "quality=error, not a temperature.",
+                        ch.name, ch.phys, raw, *RTD_VALID_C)
+                    self._reported_open.add(ch.name)
+            elif ch.kind == "rtd":
+                self._reported_open.discard(ch.name)
+            elif ch.kind == "current" and not (
+                    CURRENT_VALID_A[0] <= raw <= CURRENT_VALID_A[1]):
+                # A dead 4-20 mA loop, not a light load. See CURRENT_VALID_A.
+                quality = Quality.ERROR
+                if ch.name not in self._reported_open:
+                    log.error(
+                        "%s (%s) reads %.2f mA, outside the 4-20 mA loop range "
+                        "%.1f..%.1f mA — broken loop, unpowered transmitter, or "
+                        "no sensor. Publishing quality=error, not a weight.",
+                        ch.name, ch.phys, raw * 1e3,
+                        CURRENT_VALID_A[0] * 1e3, CURRENT_VALID_A[1] * 1e3)
+                    self._reported_open.add(ch.name)
+            elif ch.kind == "current":
+                self._reported_open.discard(ch.name)
+
+            out.append(Measurement(
+                t=now, channel=ch.name,
+                value=apply(raw, ch.offset, ch.multiplier) if quality is Quality.OK
+                      else None,
+                unit=ch.unit, raw=raw, quality=quality,
+            ))
         return out
 
     def _derive_from(self, readings: list[Measurement], now) -> list[Measurement]:
