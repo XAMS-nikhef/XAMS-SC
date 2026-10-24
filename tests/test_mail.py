@@ -219,6 +219,14 @@ class TestTheClockTheEmailIsReadIn:
         assert "LN2 in the dewar" in html
         assert "LN2 in the dewar" in text
 
+    def test_the_daily_report_carries_the_vacuum(self, webui):
+        """24 October 2026: P105, the insulation vacuum, is in the report."""
+        _, app, _ = webui
+        _, html, text = mail.digest(app.state.system, self.SUMMER)
+
+        assert "Vacuum (P105)" in html
+        assert "vacuum (P105)" in text
+
     def test_a_naive_timestamp_is_taken_as_utc_rather_than_refused(self):
         """`model.iso` raises on a naive datetime, which is right for storage.
         Refusing to render an ALARM email over a missing tzinfo is not."""
