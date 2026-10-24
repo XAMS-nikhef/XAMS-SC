@@ -49,7 +49,7 @@ whether the backup ran:
 ```
 
 It contains, in this order: a banner saying whether anything is wrong, any
-active alarms, key readings (pressure, cryostat and gas temperatures, flow,
+active alarms, key readings (pressure, insulation vacuum P105, cryostat and gas temperatures, flow,
 integrated flow, the LN2 left in the dewar), the Lake Shore control state, live HV channels,
 and housekeeping (services, mains, backup age, config hash, uptime).
 

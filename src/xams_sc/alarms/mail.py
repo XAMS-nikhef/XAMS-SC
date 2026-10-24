@@ -224,6 +224,9 @@ def digest(state, when: datetime) -> tuple[str, str, str]:
     body.append(heading("Key readings"))
     body.append(table([
         ("Main pressure", _reading(state.channel("pmain"))),
+        # The insulation vacuum (PKR gauge, P105 on the P&ID), in mbar with an
+        # exponent like everywhere else (24 October 2026, user).
+        ("Vacuum (P105)", _reading(state.channel("p105"))),
         ("Cryostat A (tt401)", _reading(state.channel("tt401"))),
         ("Cryostat B (tt402)", _reading(state.channel("tt402"))),
         ("Gas system (tt104)", _reading(state.channel("tt104"))),
@@ -294,7 +297,8 @@ def _digest_text(state, when, word, detail, alarms) -> str:
                                                a.get("threshold")))
         lines.append("")
     lines.append("KEY READINGS")
-    for label, name in (("main pressure", "pmain"), ("tt401", "tt401"),
+    for label, name in (("main pressure", "pmain"), ("vacuum (P105)", "p105"),
+                        ("tt401", "tt401"),
                         ("tt402", "tt402"), ("flow", "fm101"),
                         ("integrated flow", "fm101_total"),
                         ("LN2 in the dewar", "ln2_mass")):
