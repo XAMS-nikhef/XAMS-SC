@@ -219,6 +219,13 @@ class TestTheClockTheEmailIsReadIn:
         assert "LN2 in the dewar" in html
         assert "LN2 in the dewar" in text
 
+    def test_the_daily_report_has_no_uptime_row(self, webui):
+        """It was the report process's own age and always read 0m."""
+        _, app, _ = webui
+        _, html, _ = mail.digest(app.state.system, self.SUMMER)
+
+        assert "Uptime" not in html
+
     def test_the_daily_report_carries_the_vacuum(self, webui):
         """24 October 2026: P105, the insulation vacuum, is in the report."""
         _, app, _ = webui

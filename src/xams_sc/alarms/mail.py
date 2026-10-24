@@ -273,7 +273,8 @@ def digest(state, when: datetime) -> tuple[str, str, str]:
          BAD if on_battery else GOOD),
         ("Backup", _esc(backup_text), backup_colour),
         ("Configuration", _esc(state.config.config_hash)),
-        ("Uptime", _esc(state.uptime())),
+        # No "Uptime": it was the age of this report's own process, started a
+        # few seconds earlier, so it always read 0m (removed 24 October 2026).
     ]))
 
     subject = "XAMS daily report - %s" % (
