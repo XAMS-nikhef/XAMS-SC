@@ -229,6 +229,9 @@ def digest(state, when: datetime) -> tuple[str, str, str]:
         ("Gas system (tt104)", _reading(state.channel("tt104"))),
         ("Flow", _reading(state.channel("fm101"))),
         ("Integrated flow", _reading(state.channel("fm101_total"))),
+        # The LN2 left in the dewar (SG401 on the P&ID): gross minus the empty
+        # dewar, from the scale under it (24 October 2026, user).
+        ("LN2 in the dewar", _reading(state.channel("ln2_mass"))),
     ]))
 
     body.append(heading("Temperature control"))
@@ -293,7 +296,8 @@ def _digest_text(state, when, word, detail, alarms) -> str:
     lines.append("KEY READINGS")
     for label, name in (("main pressure", "pmain"), ("tt401", "tt401"),
                         ("tt402", "tt402"), ("flow", "fm101"),
-                        ("integrated flow", "fm101_total")):
+                        ("integrated flow", "fm101_total"),
+                        ("LN2 in the dewar", "ln2_mass")):
         view = state.channel(name)
         lines.append("  %-18s %s" % (
             label, (view.formatted() + " " + view.unit) if view and view.healthy else "--"))

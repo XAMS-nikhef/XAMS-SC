@@ -211,6 +211,14 @@ class TestTheClockTheEmailIsReadIn:
         assert "14:30" in html and "CEST" in html
         assert "14:30" in text
 
+    def test_the_daily_report_carries_the_ln2_mass(self, webui):
+        """24 October 2026: the LN2 left in the dewar is in the report."""
+        _, app, _ = webui
+        _, html, text = mail.digest(app.state.system, self.SUMMER)
+
+        assert "LN2 in the dewar" in html
+        assert "LN2 in the dewar" in text
+
     def test_a_naive_timestamp_is_taken_as_utc_rather_than_refused(self):
         """`model.iso` raises on a naive datetime, which is right for storage.
         Refusing to render an ALARM email over a missing tzinfo is not."""
