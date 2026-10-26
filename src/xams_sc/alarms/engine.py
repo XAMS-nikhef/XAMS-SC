@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from ..bus import STATUS_ARMED, STATUS_NOTIFY, TOPIC_ALARM, TOPIC_MEAS, Bus
+from ..bus import STATUS_ARMED, STATUS_NOTIFY, STATUS_READOUT, TOPIC_ALARM, TOPIC_MEAS, Bus
 from ..model import Measurement, Quality, iso, utcnow
 
 log = logging.getLogger(__name__)
@@ -136,6 +136,11 @@ class AlarmEngine:
         self.hysteresis_fraction = float(self.defaults.get("hysteresis", 0.02))
 
         self._states: dict[str, ChannelState] = {}
+        # Channels whose cDAQ readout is SWITCHED OFF (STATUS_READOUT, owned by
+        # the cdaq service; the PT1000s while the HV is on). Treated like a
+        # disabled channel: not evaluated, not stale, alarm withdrawn.
+        self._readout_status: dict | None = None
+        self._readout_off: set[str] = set()
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -186,8 +191,43 @@ class AlarmEngine:
         it must not alarm as STALE either, which is what happens otherwise:
         its driver stops publishing and 60 s later the silence is an alarm.
         """
+        if channel in self._readout_off:
+            # Switched off at run time (STATUS_READOUT): the same rule, for a
+            # readout somebody has stopped on purpose.
+            return False
         cfg = self.config.channels.get(channel)
         return cfg is None or cfg.enabled
+
+    def on_readout_status(self, topic: str, payload: str) -> None:
+        """A cDAQ readout switched off or on (retained STATUS_READOUT).
+
+        Off: the module's channels are withdrawn exactly as a channel disabled
+        in channels.yaml is - an alarm they hold is published back to ok (so
+        the history records that it ended), and they are no longer checked
+        for staleness. On: nothing to do here; they are watched again from
+        their next reading, and a sensor still broken announces itself then.
+        """
+        from ..readout import off_channels, parse_status
+        status = parse_status(payload)
+        off = off_channels(self.config, status)
+        with self._lock:
+            self._readout_status = status
+            newly_off = off - self._readout_off
+            back_on = self._readout_off - off
+            self._readout_off = off
+            for name in sorted(newly_off):
+                state = self._states.pop(name, None)
+                if state is None or (state.state == "ok" and not state.stale):
+                    continue
+                log.info("%s: readout switched off, alarm withdrawn", name)
+                state.state, state.threshold, state.stale = "ok", None, False
+                state.since = utcnow()
+                self._publish(state, None)
+        if newly_off:
+            log.warning("readout switched OFF for %s: not evaluated until it "
+                        "is switched back on", ", ".join(sorted(newly_off)))
+        if back_on:
+            log.info("readout switched back on for %s", ", ".join(sorted(back_on)))
 
     def _on_retained_alarm(self, topic: str, payload: str) -> None:
         """Withdraw an alarm left on the broker for a channel now disabled.
@@ -501,6 +541,9 @@ class AlarmEngine:
         self.min_repeat_s = float(self.defaults.get("min_repeat_minutes", 15)) * 60
         self.hysteresis_fraction = float(self.defaults.get("hysteresis", 0.02))
         self.publish_armed()
+        from ..readout import off_channels
+        with self._lock:
+            self._readout_off = off_channels(config, self._readout_status)
 
         # A channel that has been DISABLED is forgotten entirely: its alarm is
         # withdrawn and it is no longer checked for staleness. Withdrawn by
@@ -736,6 +779,7 @@ class AlarmEngine:
 
         self.bus.subscribe(f"{TOPIC_MEAS}/#", handler)
         self.bus.subscribe(f"{TOPIC_ALARM}/+", self._on_retained_alarm)
+        self.bus.subscribe(STATUS_READOUT, self.on_readout_status)
         self._publish_limits()
         self.publish_notifications()
         self.publish_armed()

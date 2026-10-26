@@ -273,7 +273,11 @@ async function refresh() {
     // The halo underneath carries the same text, or it shows through.
     const halo = document.getElementById("h-" + c.name);
     let text, colour;
-    if (!c.healthy || c.value === null) {
+    if (c.quality === "off") {
+      // Its readout is switched off on purpose (the PT1000s while the HV is
+      // on): grey, and saying so rather than a dash that looks broken.
+      text = "off"; colour = STALE_COLOUR;
+    } else if (!c.healthy || c.value === null) {
       // Grey and a dash. Never the last good number.
       text = "—"; colour = STALE_COLOUR;
     } else {
@@ -292,7 +296,7 @@ async function refresh() {
     // Where there is no bubble the unit rides in the same string; where
     // there is one it lives in its own smaller element underneath and never
     // needs touching.
-    if (node.dataset.unitInline && node.dataset.unit && text !== "—") {
+    if (node.dataset.unitInline && node.dataset.unit && text !== "—" && text !== "off") {
       text = text + " " + node.dataset.unit;
     }
     node.textContent = text;

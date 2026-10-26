@@ -11,7 +11,8 @@ cdaq:
     - {alias: "9207",   model: NI9207, slot: 1, serial: "020DFD57"}
     - {alias: "9216_1", model: NI9216, slot: 2, serial: "020F64D1", background: true, interval_s: 5}
     - {alias: "9216_2", model: NI9216, slot: 3, serial: "020F64D0", background: true, interval_s: 5}
-    - {alias: "9226",   model: NI9226, slot: 4, serial: "02159CBB", background: true, interval_s: 10}
+    - {alias: "9226",   model: NI9226, slot: 4, serial: "02159CBB", background: true, interval_s: 10,
+       switch: pt1000, label: "PT1000 readout"}
   # `background: true` (21 October 2026): the RTD modules are read in their own
   # thread every `interval_s` seconds instead of in the 1-s loop. An RTD read
   # takes seconds; in the loop it left fewer 9207 readings in each 10-s mean
@@ -25,6 +26,12 @@ cdaq:
   # High speed was REVERTED the same afternoon (user): the temperatures jumped
   # up and down with it. Back to the DAQmx default (high resolution); the
   # 10-s interval stays. `adc_timing` remains available per module.
+  # `switch` (26 October 2026): the 9226 readout can be switched off and on
+  # while running - from the Control page or `xams-ctl readout pt1000 off`.
+  # With the HV on the PT1000s are disconnected and grounded; off closes the
+  # task, so they are not read, not published and not alarmed on (they show
+  # as "off"). The state is kept in data/cdaq_readout.json across restarts.
+  # `label` is what the pages call it.
   # RTD excitation current, measured from the hardware 17 Sep 2026. Each module
   # accepts EXACTLY ONE value and neither is the DAQmx default of 2.5 mA, so
   # both must be set explicitly or the task refuses to configure. Kept here for

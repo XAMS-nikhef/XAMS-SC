@@ -60,6 +60,34 @@ temperatures jumped up and down, so the 9226 is back on the default (high
 resolution) timing; it stays at a 10-s interval. The `adc_timing` option is
 kept for later use.
 
+## Switching a readout off (26 October 2026)
+
+A module with a `switch` name in `devices.yaml` can have its readout switched
+off and on while the service runs — for now the 9226 (`switch: pt1000`,
+`label: "PT1000 readout"`). With the HV on, the PT1000s are disconnected and
+grounded; read, they would give nothing but open-circuit errors and alarms.
+
+- **Off** stops the module's thread (a read in progress finishes), closes its
+  task and drops what it read but nobody published yet. Nothing is read or
+  published for its channels; the excitation is off with the task.
+- **On** builds and starts the task again. If that fails the readout stays
+  off and the reason goes back to whoever asked.
+- The state is the cdaq service's: published retained on
+  `xams/status/readout`, kept in `data/cdaq_readout.json`, and read back at
+  start, so a restart does not start reading grounded sensors again. A module
+  switched off gets no task at start either.
+- Commands on `xams/cmd/cdaq/readout` (`{module, enabled, by}`), answered on
+  `xams/ack/cdaq/readout` and audited (`readout_switch`). From the Control
+  page or `xams-ctl readout pt1000 off|on --by <you>`.
+- Only a background module can have a switch (refused at start otherwise):
+  its task is used by its own thread alone, so closing it cannot pull it from
+  under a read.
+
+The alarm engine withdraws the channels of a module that is off, and the web
+UI and the daily report show them as off rather than broken — see
+[the alarm engine](../software/alarms.md) and
+[the Control page](../operating/webui.md#pt1000-readout).
+
 ## The slot map
 
 | Alias | Module | Slot | Reads | Channels |

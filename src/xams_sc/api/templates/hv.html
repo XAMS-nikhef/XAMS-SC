@@ -83,6 +83,8 @@ body[data-hv-window="21600"] .hv-plot button[data-window="21600"] {
   <strong>Refused — nothing was changed.</strong> {{ ls_error }}</div>{% endif %}
 {% if ln2_error %}<div class="flash bad" style="margin:0 0 1rem 0">
   <strong>Refused — nothing was changed.</strong> {{ ln2_error }}</div>{% endif %}
+{% if ro_error %}<div class="flash bad" style="margin:0 0 1rem 0">
+  <strong>Refused — nothing was changed.</strong> {{ ro_error }}</div>{% endif %}
 {% if reset == 'failed' %}<div class="flash bad" style="margin:0 0 1rem 0">
   <strong>The derived service did not acknowledge.</strong> Nothing was reset.
   </div>{% endif %}
@@ -326,6 +328,67 @@ body[data-hv-window="21600"] .hv-plot button[data-window="21600"] {
 </div>
 
 </div>{# /control-pair #}
+
+{# SWITCHABLE cDAQ READOUTS (devices.yaml `switch`; 26 October 2026). For
+   now one: the NI 9226 with the PT1000s, which are disconnected and grounded
+   while the HV is on. Off closes the module's task - its channels are not
+   read, published or alarmed on, and every page shows them as "off". A strip
+   rather than a fourth tile, and directly above the HV: switching it is part
+   of switching the HV on, and the reminder belongs where that happens. It
+   turns amber when an HV output is energised while the readout is still on -
+   a hint, never a lock (§10). Unknown (the cdaq service has not said) offers
+   no button. #}
+<div id="readout">
+{% for r in readouts %}
+<div class="card" style="margin:1.2rem 0 0 0{{ ';border-color:#d29922' if hv_energised and r.enabled }}">
+  <h2>{{ r.label }} <span class="dim" style="text-transform:none;letter-spacing:0">NI {{ r.module }}</span></h2>
+  <div class="body">
+  <div style="display:flex;flex-wrap:wrap;gap:.4rem 1.2rem;align-items:center">
+    <div>
+      {% if not r.known %}
+        <span class="warn">state unknown</span>
+        <span class="dim">— the cdaq service has not reported it</span>
+      {% elif r.enabled %}
+        <span class="good">ON</span> <span class="dim">— read and alarmed on</span>
+      {% else %}
+        <span class="bad"><strong>OFF</strong></span>
+        <span class="dim">— by {{ r.by or 'somebody' }}{{ (', ' + r.at[:16]|replace('T', ' ')) if r.at }} UTC;
+          not read, no alarms</span>
+      {% endif %}
+    </div>
+    {% if r.known and r.enabled %}
+    <div style="font-variant-numeric:tabular-nums">
+      {% for c in r.channels %}
+        <span style="margin-right:.8rem"><span class="dim">{{ c.name }}</span>
+          <span class="{{ '' if c.healthy else 'dim' }}">{{ c.formatted() }}</span></span>
+      {% endfor %}
+      <span class="dim">°C</span>
+    </div>
+    {% endif %}
+    {% if r.known %}
+    <form method="post" action="/cdaq/readout" class="reset-form" style="margin-left:auto"
+          data-confirm="{{ ('Switch the ' ~ r.label ~ ' OFF? Its channels are no longer read, published or alarmed on until it is switched back on. Then disconnect and ground the sensors.')
+                           if r.enabled else ('Switch the ' ~ r.label ~ ' back ON? Reconnect the sensors first: a sensor still grounded reads as an open circuit and raises an alarm.') }}"
+          onsubmit="return confirm(this.dataset.confirm);">
+      <input type="hidden" name="module" value="{{ r.module }}">
+      <input type="hidden" name="enabled" value="{{ '0' if r.enabled else '1' }}">
+      <button type="submit">{{ 'Switch readout off' if r.enabled else 'Switch readout on' }}</button>
+    </form>
+    {% endif %}
+  </div>
+  </div>{# /body #}
+  {% if hv_energised and r.enabled %}
+  <div class="warn" style="margin:0 .9rem .5rem .9rem">HV is on and the {{ r.label }} is still ON —
+    switch it off before the sensors are disconnected and grounded.</div>
+  {% endif %}
+  <div class="note" style="margin-top:.4rem">
+    Order: switch off, then disconnect and ground the sensors, then HV on.
+    Back: HV off, reconnect, then switch on. Also
+    <code>xams-ctl readout {{ r.switch }} off|on --by &lt;you&gt;</code>.
+  </div>
+</div>
+{% endfor %}
+</div>
 
 {# The `#hv` anchor WITHOUT a heading over it. The heading said "High
    voltage" above two cards that already name themselves hv_1 and hv_2, on a
@@ -765,7 +828,7 @@ document.addEventListener('submit', function (e) {
 // switching, so its button comes back the moment the board has got there.
 // Paused from a submit until the answer replaces the page.
 (function () {
-  var LIVE = ['cryostat', 'flow', 'ln2', 'setpoints', 'hv-forms'];
+  var LIVE = ['cryostat', 'flow', 'ln2', 'readout', 'setpoints', 'hv-forms'];
   var busy = false;
   // NO BUTTON ON THIS PAGE RELOADS IT (14 October 2026). Every write was a
   // plain form post answered with a redirect, so the whole page was loaded
@@ -783,6 +846,7 @@ document.addEventListener('submit', function (e) {
     '/lakeshore/setpoint': {err: 'ls_error', box: 'ctl-msg'},
     '/lakeshore/range':    {err: 'ls_error', box: 'ctl-msg'},
     '/alarms/arm':         {err: 'ln2_error', box: 'ctl-msg'},
+    '/cdaq/readout':       {err: 'ro_error', box: 'hv-msg'},
     '/flow/reset':         {err: 'reset', bad: 'failed', box: 'ctl-msg',
                             text: 'the derived service did not acknowledge; nothing was reset.'}
   };

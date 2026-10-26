@@ -27,18 +27,33 @@ Tasks actually created:
 
 Modules are addressed by **alias** (`9207/ai0`), not `cDAQ1Mod1/ai0`. Aliases
 are configured in NI-MAX and survive re-slotting.
+
+**A module with a `switch` can have its readout switched off and on while the
+service runs** (26 October 2026; the 9226 with the PT1000s, which are
+disconnected and grounded while the HV is on). Off stops the module's thread
+and closes its task: nothing is read or published for its channels, and the
+alarm engine and the pages show them as off. On builds the task again. The
+state is published retained on STATUS_READOUT and kept in
+data/cdaq_readout.json, so a restart does not quietly start reading grounded
+sensors again. Only background modules can be switched: their task is used by
+their own thread alone, so closing it cannot pull it from under a read.
 """
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 import random
 import threading
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 
-from ..config import Channel, Config
-from ..model import Measurement, Quality, utcnow
+from ..bus import ACK_READOUT, STATUS_READOUT, TOPIC_AUDIT, TOPIC_READOUT
+from ..config import ROOT, Channel, Config
+from ..model import Measurement, Quality, iso, utcnow
+from ..readout import switchable_modules
 from ..scaling import apply
 from ..service import BaseService
 
@@ -124,6 +139,10 @@ class ModuleTask:
     adc_timing: str | None = None
     # Read durations since the last report: (count, total seconds, max).
     timing: list = field(default_factory=lambda: [0, 0.0, 0.0])
+    # The module's own thread and its stop, so one module can be switched
+    # off without stopping the others (devices.yaml `switch`).
+    bg_stop: threading.Event = field(default_factory=threading.Event)
+    thread: threading.Thread | None = None
 
 # devices.yaml `adc_timing` -> nidaqmx.constants.ADCTimingMode member.
 # 21 October 2026: the 9226 in its default (high resolution) mode converts for
@@ -143,7 +162,8 @@ TIMING_REPORT_S = 600.0
 class CdaqService(BaseService):
     name = "cdaq"
 
-    def __init__(self, config: Config, bus, simulate: bool = False, **kw):
+    def __init__(self, config: Config, bus, simulate: bool = False,
+                 readout_state_path: Path | str | None = None, **kw):
         super().__init__(config, bus, simulate=simulate, **kw)
         self._modules: list[ModuleTask] = []
         self._derived: list[Channel] = []
@@ -157,7 +177,17 @@ class CdaqService(BaseService):
         self._bg_threads: list[threading.Thread] = []
         self._bg_failed: set[str] = set()
         self._next_timing_report = time.monotonic() + TIMING_REPORT_S
+        # Switchable readouts (devices.yaml `switch`): alias -> {"enabled",
+        # "by", "at"}; a module not in it is on. Read back before the tasks
+        # are opened, so a module switched off stays off across a restart.
+        self._readout_path = Path(readout_state_path or ROOT / "data" / "cdaq_readout.json")
+        self._switchable = switchable_modules(config)
+        self._readout: dict[str, dict] = {}
+        self._switch_lock = threading.Lock()
+        self._restore_readout()
         self._build_tasks()
+        self.bus.subscribe(TOPIC_READOUT, self._on_readout_command)
+        self.publish_readout()
 
     # ------------------------------------------------------------------ setup
 
@@ -193,6 +223,9 @@ class CdaqService(BaseService):
                              background=bool(spec.get("background", False)),
                              interval_s=float(spec.get("interval_s", 5.0)),
                              adc_timing=spec.get("adc_timing"))
+            if spec.get("switch") and not mod.background:
+                raise ValueError(f"devices.yaml cdaq module {alias}: a `switch` needs "
+                                 f"`background: true` (its task must be its own thread's)")
             if mod.adc_timing is not None and mod.adc_timing not in ADC_TIMING:
                 raise ValueError(f"devices.yaml cdaq module {alias}: adc_timing "
                                  f"{mod.adc_timing!r} is not one of {sorted(ADC_TIMING)}")
@@ -201,7 +234,8 @@ class CdaqService(BaseService):
                      alias, models.get(alias, "?"), len(channels),
                      (f", read in the background every {mod.interval_s:g} s"
                       if mod.background else "")
-                     + (f", ADC timing {mod.adc_timing}" if mod.adc_timing else ""))
+                     + (f", ADC timing {mod.adc_timing}" if mod.adc_timing else "")
+                     + (", readout SWITCHED OFF" if not self.readout_on(alias) else ""))
 
         skipped = [a for a in models if a not in by_alias]
         if skipped:
@@ -269,6 +303,11 @@ class CdaqService(BaseService):
         from nidaqmx.constants import ADCTimingMode
 
         for mod in self._modules:
+            if not self.readout_on(mod.alias):
+                log.warning("%s: readout switched OFF (by %s) - no task, its "
+                            "channels are not read", mod.alias,
+                            self._readout.get(mod.alias, {}).get("by") or "somebody")
+                continue
             try:
                 task = self._new_task(mod)
                 if task is None:
@@ -373,6 +412,146 @@ class CdaqService(BaseService):
         task.start()
         return task
 
+    # ------------------------------------------------- switchable readouts
+
+    def readout_on(self, alias: str) -> bool:
+        """Is this module's readout on? Always for a module without a switch:
+        a state file left from an earlier configuration cannot stop one."""
+        if alias not in self._switchable:
+            return True
+        return bool(self._readout.get(alias, {}).get("enabled", True))
+
+    def _restore_readout(self) -> None:
+        try:
+            data = json.loads(self._readout_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        if isinstance(data, dict):
+            self._readout = {str(k): dict(v) for k, v in data.items()
+                             if isinstance(v, dict)}
+
+    def _save_readout(self) -> None:
+        try:
+            self._readout_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self._readout_path.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(self._readout), encoding="utf-8")
+            os.replace(tmp, self._readout_path)
+        except OSError:
+            # In force for this process either way; what is lost is only that
+            # it survives a restart - and that is said, not swallowed.
+            log.exception("could not persist the readout switches to %s",
+                          self._readout_path)
+
+    def readout_view(self) -> dict:
+        """Every switchable module and its switch, for STATUS_READOUT."""
+        return {alias: {"enabled": self.readout_on(alias),
+                        "switch": spec["switch"], "label": spec["label"],
+                        "by": str(self._readout.get(alias, {}).get("by") or ""),
+                        "at": str(self._readout.get(alias, {}).get("at") or "")}
+                for alias, spec in sorted(self._switchable.items())}
+
+    def publish_readout(self) -> None:
+        """Retained, so every page and the alarm engine know at once."""
+        self.bus.publish_raw(STATUS_READOUT, json.dumps(
+            self.readout_view(), separators=(",", ":")), retain=True)
+
+    def _on_readout_command(self, topic: str, payload: str) -> None:
+        """On the bus thread: hand the work to a thread of its own. Switching
+        off waits for a read in progress (seconds for an RTD module), which
+        must not hold up every other message to this service."""
+        threading.Thread(target=self._handle_readout, args=(payload,),
+                         name="cdaq-readout-switch", daemon=True).start()
+
+    def _handle_readout(self, payload: str) -> None:
+        try:
+            request = json.loads(payload)
+            module = str(request["module"])
+            wanted = bool(request["enabled"])
+        except (ValueError, KeyError, TypeError):
+            log.error("readout command ignored, malformed: %r", payload)
+            self.bus.publish_raw(ACK_READOUT, json.dumps(
+                {"ok": False, "reason": "malformed command"}))
+            return
+        by = str(request.get("by") or "") or "unknown"
+        result = self.set_readout(module, wanted, by)
+        self.bus.publish_raw(TOPIC_AUDIT, json.dumps({
+            "t": result.get("at") or iso(utcnow()), "actor": by,
+            "action": "readout_switch", "target": module,
+            "old": None if "was" not in result else ("on" if result["was"] else "off"),
+            "new": "on" if wanted else "off",
+            "result": "ok" if result.get("ok") else "refused",
+            "detail": result.get("reason", ""),
+        }, separators=(",", ":")))
+        self.bus.publish_raw(ACK_READOUT, json.dumps(result, separators=(",", ":")))
+
+    def set_readout(self, alias: str, enabled: bool, by: str) -> dict:
+        """Switch one module's readout off or on. Returns the acknowledgement.
+
+        Off: its thread is stopped (a read in progress finishes), the task is
+        closed, and what it read but nobody published yet is dropped. On: the
+        task is built and started again; if that fails the readout stays off
+        and the reason is returned. Switching to the state it is in changes
+        nothing and is reported as ok, so a double click is harmless.
+        """
+        if alias not in self._switchable:
+            return {"ok": False, "module": alias,
+                    "reason": f"{alias} is not a switchable readout"}
+        mod = next((m for m in self._modules if m.alias == alias), None)
+        with self._switch_lock:
+            was = self.readout_on(alias)
+            if mod is not None and not self.simulate and enabled != was:
+                if enabled:
+                    reason = self._open_module(mod)
+                    if reason:
+                        log.error("%s: readout could NOT be switched on: %s",
+                                  alias, reason)
+                        return {"ok": False, "module": alias, "was": was,
+                                "reason": f"the {alias} task could not be started: {reason}"}
+                else:
+                    self._close_module(mod)
+            now = iso(utcnow())
+            self._readout[alias] = {"enabled": bool(enabled), "by": by, "at": now}
+            self._save_readout()
+            self.publish_readout()
+        label = self._switchable[alias]["label"]
+        if enabled:
+            log.warning("%s (%s) SWITCHED ON by %s", label, alias, by)
+        else:
+            log.warning("%s (%s) SWITCHED OFF by %s: its channels are not read, "
+                        "published or alarmed on until it is switched back on",
+                        label, alias, by)
+        return {"ok": True, "module": alias, "enabled": bool(enabled),
+                "was": was, "by": by, "at": now}
+
+    def _close_module(self, mod: ModuleTask) -> None:
+        self._stop_module_thread(mod)
+        if mod.task is not None:
+            try:
+                mod.task.close()
+            except Exception:
+                log.exception("%s: closing the task raised", mod.alias)
+            mod.task = None
+        names = {c.name for c in mod.channels}
+        with self._bg_lock:
+            self._bg_pending = [m for m in self._bg_pending if m.channel not in names]
+        self._bg_failed.discard(mod.alias)
+
+    def _open_module(self, mod: ModuleTask) -> str | None:
+        """Build, start and thread one module's task. None, or why not."""
+        try:
+            from nidaqmx.constants import ADCTimingMode
+            task = self._new_task(mod)
+            if task is None:
+                return "its channels cannot be configured"
+            mod.task = self._start_task(mod, task, ADCTimingMode)
+        except Exception as exc:
+            mod.task = None
+            return str(exc)
+        log.info("task for %s ready (%d channels)", mod.alias, len(mod.channels))
+        if mod.background:
+            self._start_module_thread(mod)
+        return None
+
     # ------------------------------------------------------------ background
 
     def _start_background(self) -> None:
@@ -380,21 +559,40 @@ class CdaqService(BaseService):
         self._bg_stop.clear()
         for mod in self._modules:
             if mod.background and mod.task is not None:
-                th = threading.Thread(target=self._background_loop, args=(mod,),
-                                      name=f"cdaq-{mod.alias}", daemon=True)
-                th.start()
-                self._bg_threads.append(th)
+                self._start_module_thread(mod)
+
+    def _start_module_thread(self, mod: ModuleTask) -> None:
+        mod.bg_stop = threading.Event()
+        th = threading.Thread(target=self._background_loop, args=(mod,),
+                              name=f"cdaq-{mod.alias}", daemon=True)
+        mod.thread = th
+        th.start()
+        self._bg_threads.append(th)
+
+    def _stop_module_thread(self, mod: ModuleTask) -> None:
+        """Stop one module's thread and wait out a read in progress."""
+        mod.bg_stop.set()
+        if mod.thread is not None:
+            mod.thread.join(timeout=30.0)
+            if mod.thread in self._bg_threads:
+                self._bg_threads.remove(mod.thread)
+            mod.thread = None
 
     def _stop_background(self) -> None:
         """Stop the threads BEFORE their tasks are closed under them. The join
         waits out a read in progress (an RTD read takes seconds)."""
         self._bg_stop.set()
+        for mod in self._modules:
+            mod.bg_stop.set()
         for th in self._bg_threads:
             th.join(timeout=30.0)
         self._bg_threads = []
+        for mod in self._modules:
+            mod.thread = None
 
     def _background_loop(self, mod: ModuleTask) -> None:
-        while not self._bg_stop.is_set():
+        stop = mod.bg_stop
+        while not self._bg_stop.is_set() and not stop.is_set():
             t0 = time.monotonic()
             try:
                 values = self._timed_read(mod)
@@ -413,8 +611,9 @@ class CdaqService(BaseService):
                 readings = [Measurement(t=now, channel=ch.name, value=None, unit=ch.unit,
                                         quality=Quality.ERROR) for ch in mod.channels]
             with self._bg_lock:
-                self._bg_pending.extend(readings)
-            self._bg_stop.wait(max(0.0, mod.interval_s - (time.monotonic() - t0)))
+                if not stop.is_set():       # switched off during the read
+                    self._bg_pending.extend(readings)
+            stop.wait(max(0.0, mod.interval_s - (time.monotonic() - t0)))
 
     def _take_background(self) -> list[Measurement]:
         with self._bg_lock:
@@ -583,6 +782,8 @@ class CdaqService(BaseService):
         now = utcnow()
         out = []
         for mod in self._modules:
+            if not self.readout_on(mod.alias):
+                continue
             for ch in mod.channels:
                 if ch.kind == "rtd":
                     raw = random.gauss(-60.0, 0.5)

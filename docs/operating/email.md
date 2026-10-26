@@ -51,7 +51,8 @@ whether the backup ran:
 It contains, in this order: a banner saying whether anything is wrong, any
 active alarms, key readings (pressure, insulation vacuum P105, cryostat and gas temperatures, flow,
 integrated flow, the LN2 left in the dewar), the Lake Shore control state, live HV channels,
-and housekeeping (services, mains, backup age, config hash).
+and housekeeping (services, mains, backup age, config hash, and a switchable
+cDAQ readout such as the PT1000s when it is OFF, with since when and by whom).
 
 **Ordered so a good day can be read and dismissed at the banner.** Somebody
 skimming it on a phone over breakfast should not have to scroll to learn that

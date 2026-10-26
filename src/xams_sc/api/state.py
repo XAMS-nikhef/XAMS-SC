@@ -18,7 +18,7 @@ import time
 from collections import deque
 from dataclasses import dataclass
 
-from ..bus import (ACK_ARM, ACK_HV_CLEAR, ACK_HV_OUTPUT, ACK_HV_VSET, ACK_LS_RANGE, ACK_LS_SETPOINT,
+from ..bus import (ACK_ARM, ACK_READOUT, ACK_HV_CLEAR, ACK_HV_OUTPUT, ACK_HV_VSET, ACK_LS_RANGE, ACK_LS_SETPOINT,
                    ACK_NOTIFY, ACK_RGA_CONTROL, ACK_RGA_EM, ACK_RGA_EMISSION, ACK_RGA_SAVE, ACK_RGA_SCAN,
                    TOPIC_RGA_SCANDATA, TOPIC_ALARM, TOPIC_BACKUP, TOPIC_FLOW_RESET,
                    TOPIC_HV_SWITCHING, TOPIC_HV_TRIP, TOPIC_MEAS, TOPIC_RELOAD, TOPIC_RGA_INFO,
@@ -27,6 +27,11 @@ from ..bus import (ACK_ARM, ACK_HV_CLEAR, ACK_HV_OUTPUT, ACK_HV_VSET, ACK_LS_RAN
 from ..model import Measurement, Quality, ServiceState, parse_iso, utcnow
 
 log = logging.getLogger(__name__)
+
+# The quality shown for a channel whose readout is switched off (the PT1000s
+# while the HV is on). Not a Quality the drivers publish: nothing is published
+# for such a channel, and this is the page saying why.
+READOUT_OFF = "off"
 
 
 # The plots on the Control page (14 October 2026): how far back the web UI
@@ -80,6 +85,12 @@ class ChannelView:
     def healthy(self) -> bool:
         return self.quality == Quality.OK.value and not self.stale
 
+    @property
+    def off(self) -> bool:
+        """Its cDAQ readout is switched off on purpose (STATUS_READOUT): not
+        read and not broken. Not healthy either - there is no value."""
+        return self.quality == READOUT_OFF
+
     def formatted(self) -> str:
         """A value fit to print, or an honest dash.
 
@@ -131,6 +142,9 @@ class SystemState:
         # The per-channel alarm switches (alarms.yaml `switchable`), retained
         # by the engine on xams/status/armed. None until it has spoken.
         self._armed: dict | None = None
+        # Switchable cDAQ readouts (devices.yaml `switch`), retained by the
+        # cdaq service on xams/status/readout. None until it has spoken.
+        self._readout: dict | None = None
         # Latched HV trips, by hv_vset channel, from the CAEN service's
         # retained records. Emptied by a clear.
         self._hv_trips: dict[str, dict] = {}
@@ -181,6 +195,11 @@ class SystemState:
                 return
             with self._lock:
                 self._armed = loaded if isinstance(loaded, dict) else None
+            return
+        if len(parts) == 3 and parts[2] == "readout":
+            from ..readout import parse_status
+            with self._lock:
+                self._readout = parse_status(payload)
             return
         if len(parts) == 3 and parts[2] == "limits":
             try:
@@ -482,6 +501,7 @@ class SystemState:
         self.bus.subscribe(ACK_HV_CLEAR, self._on_ack)
         self.bus.subscribe(ACK_NOTIFY, self._on_ack)
         self.bus.subscribe(ACK_ARM, self._on_ack)
+        self.bus.subscribe(ACK_READOUT, self._on_ack)
         self.bus.subscribe(ACK_RGA_CONTROL, self._on_ack)
         self.bus.subscribe(ACK_RGA_SCAN, self._on_ack)
         self.bus.subscribe(ACK_RGA_SAVE, self._on_ack)
@@ -504,6 +524,13 @@ class SystemState:
             received = self._received_at.get(name, 0.0)
             alarm = self._alarms.get(name, {})
         cfg = self.config.channels.get(name)
+        if name in self._off_channels():
+            # Never its last value: it is not being read, and says so.
+            return ChannelView(name=name, value=None,
+                               unit=cfg.unit if cfg else (m.unit if m else ""),
+                               quality=READOUT_OFF, age_s=0.0,
+                               description=cfg.description if cfg else "",
+                               device=cfg.device if cfg else "")
         if m is None:
             if cfg is None:
                 return None
@@ -615,7 +642,40 @@ class SystemState:
                 "warn_kg": limits.get("low"), "alarm_kg": limits.get("lolo")}
 
     def unhealthy_channels(self) -> list[ChannelView]:
-        return [c for c in self.channels() if not c.healthy]
+        # A readout switched off on purpose is not a channel that is not
+        # reading: it is listed on the Control page, not counted here.
+        return [c for c in self.channels() if not c.healthy and not c.off]
+
+    def _off_channels(self) -> set[str]:
+        from ..readout import off_channels
+        with self._lock:
+            status = self._readout
+        return off_channels(self.config, status) if status else set()
+
+    def readouts(self) -> list[dict]:
+        """Every switchable cDAQ readout, for its card on the Control page.
+
+        `known` False while the cdaq service has not said - drawn as unknown,
+        with no button, for the same reason as the alarm switches: a button
+        needs a state to change. `channels` are the module's channels as
+        shown (their values when on, "off" when off).
+        """
+        from ..readout import channels_of, switchable_modules
+        with self._lock:
+            status = dict(self._readout) if self._readout is not None else None
+        out = []
+        for alias, spec in switchable_modules(self.config).items():
+            s = (status or {}).get(alias)
+            out.append({
+                "module": alias, "switch": spec["switch"], "label": spec["label"],
+                "known": isinstance(s, dict),
+                "enabled": bool(s.get("enabled", True)) if isinstance(s, dict) else None,
+                "by": str((s or {}).get("by") or ""),
+                "at": str((s or {}).get("at") or ""),
+                "channels": [v for v in (self.channel(n) for n in channels_of(self.config, alias))
+                             if v is not None],
+            })
+        return out
 
     def known_faults(self) -> list[dict]:
         """Channels disabled in the configuration, with the reason.
