@@ -315,6 +315,31 @@ for as long as it is. The value still turns amber and red and stays on the
 Alarms page; the master switch for everything is on Alarms. If the alarm
 engine has not reported the switch, the tile says so and offers no button.
 
+### PT1000 readout
+
+A strip of its own directly above the high voltage: the NI 9226 with the
+PT1000s (tt201, tt203–tt207). With the HV on these sensors are disconnected
+and grounded, and read they would only give open-circuit errors and major
+alarms. **Switch readout off** closes the module's task: the channels are not
+read, published or alarmed on, and every page shows them as **off** — the
+Control page, the P&ID (grey "off", not a dash), the Readings page and
+`/api/state` (`quality: "off"`); Grafana has a gap. They are not counted as
+"channels not reading". **Switch readout on** builds the task again; a sensor
+that is still grounded then reads as an open circuit and alarms, which is the
+point.
+
+The order: switch off, then disconnect and ground, then HV on; back: HV off,
+reconnect, then switch on. When an HV output is energised while the readout is
+still on, the strip turns amber and says so — a hint, never a lock. The switch
+is confirmed, audited with your name, kept by the cdaq service across a
+restart (`data/cdaq_readout.json`), and the daily report says "OFF since …"
+every morning it stays off. While the cdaq service has not reported the state
+the strip says *state unknown* and offers no button. From a terminal:
+
+```powershell
+.\.venv\Scripts\python.exe -m xams_sc.cli.xams_ctl readout pt1000 off --by <you>
+```
+
 The cryostat, the flow integrator and the LN₂ dewar are the three equal tiles
 at the top of the page, each with its readings on the left and its plot on the
 right (stacked on a narrow window); the high voltage, which

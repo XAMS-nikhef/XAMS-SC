@@ -58,6 +58,13 @@ Two further conditions raise alarms without any threshold being crossed:
 - **Bad quality.** A reading published with `quality=error` is a failed read,
   and is treated as a fault rather than ignored.
 
+Neither applies to a channel that is not being read on purpose: one disabled in
+`channels.yaml`, or one whose cDAQ readout is **switched off** at run time
+(`xams/status/readout`, owned by the cdaq service; the PT1000s while the HV is
+on). Its alarm is withdrawn — published back to `ok`, so the history records
+the end — and it is neither evaluated nor checked for staleness until the
+readout is switched on again.
+
 !!! warning "Physics thresholds are still largely TBD"
     `alarms.yaml` carries the structure, the staleness rules and the
     pressures; the rest await the LabVIEW `Error and Alarm` tab (§16). The

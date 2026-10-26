@@ -770,6 +770,51 @@ def _set_notifications(args, enabled: bool) -> int:
     return 0
 
 
+def cmd_readout(args) -> int:
+    """Switch a cDAQ readout off or on (devices.yaml `switch`).
+
+    `xams-ctl readout pt1000 off` before the PT1000s are disconnected and
+    grounded for the HV; `on` once they are connected again. Off: the module
+    is not read, published or alarmed on. The cdaq service owns the state and
+    keeps it across a restart.
+    """
+    from ..bus import ACK_READOUT, TOPIC_READOUT, BrokerUnreachable
+    from ..readout import module_for_switch, switchable_modules
+
+    config = load()
+    module = module_for_switch(config, args.name)
+    if module is None:
+        names = sorted(s["switch"] for s in switchable_modules(config).values())
+        print(f"no switchable readout called {args.name!r}; known: "
+              f"{', '.join(names) or 'none'}")
+        return 1
+    wanted = args.state == "on"
+    who = args.by or os.environ.get("USERNAME") or "unknown"
+    try:
+        with _session("xams-ctl-readout", ACK_READOUT, args) as session:
+            # 30 s: off waits out an RTD read in progress, on builds a task.
+            ack = session.send(TOPIC_READOUT, ACK_READOUT,
+                               {"module": module, "enabled": wanted, "by": who},
+                               timeout_s=30.0, match=("module",))
+    except BrokerUnreachable:
+        print("broker not reachable; nothing was sent")
+        return 1
+    if ack is None:
+        print("NO ANSWER - is the cdaq service running? Nothing was changed.")
+        return 1
+    if not ack.get("ok"):
+        print(f"refused: {ack.get('reason', 'no reason given')}")
+        return 1
+    label = switchable_modules(config)[module]["label"]
+    if wanted:
+        print(f"{label} ({module}) is ON (by {who})")
+    else:
+        print(f"{label} ({module}) is OFF (by {who}): not read, published or "
+              f"alarmed on until")
+        print(f"    xams-ctl readout {args.name} on --by <you>")
+    return 0
+
+
 def cmd_alarms_on(args) -> int:
     """Turn alarm delivery back on for the whole system."""
     return _set_notifications(args, True)
@@ -894,6 +939,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="stop delivering alarms to anybody (they are still evaluated)")
     alarms_off.add_argument("--by", help="who is doing this (recorded in audit)")
     alarms_off.set_defaults(func=cmd_alarms_off)
+
+    readout = sub.add_parser(
+        "readout",
+        help="switch a cDAQ readout off or on (e.g. the PT1000s while the HV "
+             "is on: `readout pt1000 off`)")
+    readout.add_argument("name", help="the switch name in devices.yaml, e.g. pt1000")
+    readout.add_argument("state", choices=["on", "off"], help="on or off")
+    readout.add_argument("--by", help="who is doing this (recorded in audit)")
+    readout.set_defaults(func=cmd_readout)
 
     alarms_on = sub.add_parser("alarms-on",
                                help="deliver alarms again")

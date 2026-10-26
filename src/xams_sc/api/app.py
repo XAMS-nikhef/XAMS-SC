@@ -46,7 +46,7 @@ from fastapi.responses import (HTMLResponse, JSONResponse, PlainTextResponse,
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from ..bus import (ACK_ARM, TOPIC_ARM,
+from ..bus import (ACK_ARM, TOPIC_ARM, ACK_READOUT, TOPIC_READOUT,
                    ACK_RGA_CONTROL, ACK_RGA_EM, ACK_RGA_EMISSION, ACK_RGA_SAVE, ACK_RGA_SCAN,
                    TOPIC_RGA_CONTROL, TOPIC_RGA_EM, TOPIC_RGA_EMISSION, TOPIC_RGA_SAVE, TOPIC_RGA_SCAN,
                    ACK_HV_CLEAR, ACK_HV_OUTPUT, ACK_HV_VSET, ACK_LS_RANGE,
@@ -818,6 +818,33 @@ def create_app(broker: str = "127.0.0.1", port: int = 1883, *,
                     "ON" if wanted else "OFF", who)
         return RedirectResponse("/hv?ln2_ok=1#ln2", status_code=303)
 
+    @app.post("/cdaq/readout")
+    def cdaq_readout(request: Request, module: str = Form(""),
+                     enabled: str = Form(""), by: str = Form("")):
+        """Switch a cDAQ module's readout off or on (devices.yaml `switch`;
+        for now the NI 9226 with the PT1000s, 26 October 2026).
+
+        The cdaq service decides and answers: it closes or rebuilds the task,
+        keeps the state and audits it. Off means its channels are not read,
+        published or alarmed on - for sensors that are disconnected and
+        grounded while the HV is on.
+        """
+        from urllib.parse import quote
+        who = operator_of(request, by)
+        wanted = enabled.strip().lower() in ("1", "true", "on", "yes")
+        # Up to 30 s: switching off waits out an RTD read in progress, and
+        # switching on builds a DAQmx task.
+        answer = state.command(TOPIC_READOUT, ACK_READOUT,
+                               {"module": module, "enabled": wanted, "by": who},
+                               timeout_s=30.0, match=("module",))
+        if not answer.get("ok"):
+            return RedirectResponse(
+                "/hv?ro_error=" + quote(str(answer.get("reason", "refused")))
+                + "#readout", status_code=303)
+        log.warning("readout %s switched %s by %s", module,
+                    "ON" if wanted else "OFF", who)
+        return RedirectResponse("/hv#readout", status_code=303)
+
     @app.get("/status", response_class=HTMLResponse)
     def status(request: Request):
         by_device: dict[str, list] = {}
@@ -1122,10 +1149,16 @@ def create_app(broker: str = "127.0.0.1", port: int = 1883, *,
         q = request.query_params
         moving = any(c["ramping"] or c["switching"] or c["discharging"]
                      for s in supplies for c in s["channels"])
+        # Any HV output energised: with a readout still on, the page says the
+        # sensors should be switched off before they are grounded. A hint,
+        # never a lock - this software is not in the protection path (§10).
+        hv_energised = any(c.get("energised") for s in supplies for c in s["channels"])
         return page(request, "hv.html", supplies=supplies, moving=moving,
                     hv_ok=q.get("hv_ok"), hv_error=q.get("hv_error"),
                     lakeshore=lakeshore_view(), flow=state.flow_total(),
                     ln2=state.ln2(), ln2_error=q.get("ln2_error"),
+                    readouts=state.readouts(), ro_error=q.get("ro_error"),
+                    hv_energised=hv_energised,
                     ls_ok=q.get("ls_ok"), ls_error=q.get("ls_error"),
                     reset=q.get("reset"), reset_total=q.get("total"))
 

@@ -272,6 +272,7 @@ def digest(state, when: datetime) -> tuple[str, str, str]:
         ("Mains", "ON BATTERY" if on_battery else "line power",
          BAD if on_battery else GOOD),
         ("Backup", _esc(backup_text), backup_colour),
+        *_readout_rows(state),
         ("Configuration", _esc(state.config.config_hash)),
         # No "Uptime": it was the age of this report's own process, started a
         # few seconds earlier, so it always read 0m (removed 24 October 2026).
@@ -284,6 +285,22 @@ def digest(state, when: datetime) -> tuple[str, str, str]:
                  accent, "".join(body),
                  preheader="%s. %s" % (word, detail))
     return subject, html, _digest_text(state, when, word, detail, alarms)
+
+
+def _readout_rows(state) -> list[tuple]:
+    """A switchable cDAQ readout that is OFF, one row each (26 October 2026).
+
+    Off is a deliberate state - the PT1000s while the HV is on - so it is not
+    counted as "not reading". It is still said every morning, in amber, so a
+    readout left off after the HV came down is noticed the next day.
+    """
+    rows = []
+    for r in state.readouts():
+        if r["known"] and r["enabled"] is False:
+            since = (r["at"][:16].replace("T", " ") + " UTC") if r["at"] else "?"
+            rows.append((r["label"],
+                         _esc(f"OFF since {since}, by {r['by'] or 'somebody'}"), WARN))
+    return rows
 
 
 def _digest_text(state, when, word, detail, alarms) -> str:
@@ -306,6 +323,11 @@ def _digest_text(state, when, word, detail, alarms) -> str:
         view = state.channel(name)
         lines.append("  %-18s %s" % (
             label, (view.formatted() + " " + view.unit) if view and view.healthy else "--"))
+    for r in state.readouts():
+        if r["known"] and r["enabled"] is False:
+            lines += ["", "%s OFF since %s, by %s" % (
+                r["label"], r["at"][:16].replace("T", " ") + " UTC" if r["at"] else "?",
+                r["by"] or "somebody")]
     lines += ["", "Web UI: " + UI_URL]
     return "\n".join(lines)
 

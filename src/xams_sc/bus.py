@@ -123,6 +123,18 @@ TOPIC_ARM = "xams/cmd/alarms/arm"
 ACK_ARM = "xams/ack/alarms/arm"
 STATUS_ARMED = "xams/status/armed"
 
+# A cDAQ module's readout switched off and on at run time (devices.yaml
+# `switch` on the module; for now the NI 9226 with the PT1000s, 26 October
+# 2026). With the HV on, the PT1000s are disconnected and grounded; read, they
+# would only produce open-circuit errors and alarms. Off closes the module's
+# task: nothing is read or published, and the alarm engine and the pages treat
+# its channels as switched off rather than broken. The state of every
+# switchable module is RETAINED on STATUS_READOUT, owned by the cdaq service,
+# which also keeps it across a restart (data/cdaq_readout.json).
+TOPIC_READOUT = "xams/cmd/cdaq/readout"
+ACK_READOUT = "xams/ack/cdaq/readout"
+STATUS_READOUT = "xams/status/readout"
+
 # What the RGA is and who controls it (docs/drivers/rga.md): identity,
 # firmware, filaments, units and the controlling client, RETAINED for the RGA
 # page. Descriptive, not a measurement - it is outside xams/meas, so the
