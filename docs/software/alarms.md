@@ -65,6 +65,34 @@ on). Its alarm is withdrawn — published back to `ok`, so the history records
 the end — and it is neither evaluated nor checked for staleness until the
 readout is switched on again.
 
+### Unreadable groups: one alarm, later, quieter
+
+The default — any unreadable channel is a major alarm at once — is right for
+a sensor the plant depends on and wrong for an instrument used on demand. An
+`unreadable:` group in `alarms.yaml` changes that for a set of channels:
+
+```yaml
+unreadable:
+  rga:
+    channels: [rga_status, rga_emission, rga_em, rga_control, rga_hw_errors,
+               rga_hw_warnings, rga_tp_trips, rga_box_temp]
+    alarm_on: rga_status       # the one channel that speaks for the group
+    after_seconds: 180         # unreadable (bad quality or silent) this long first
+    severity: minor
+    notify: [email]
+```
+
+Only `alarm_on` alarms, and only after the group has been unreadable for
+`after_seconds` (silence: at least `stale_after_seconds` too); a good reading
+restarts the clock. The other channels never alarm on being unreadable; any
+thresholds they have still apply to their values. A channel name that is not
+a channel stops the load.
+
+Added on 28 October 2026 for the RGA: its HTTP server missed a few requests a
+dozen times that day, and each 20-s outage gave eight major alarms and eight
+flight-recorder dumps. Now a short outage gives nothing, and one lasting three
+minutes gives one minor alarm by email.
+
 !!! warning "Physics thresholds are still largely TBD"
     `alarms.yaml` carries the structure, the staleness rules and the
     pressures; the rest await the LabVIEW `Error and Alarm` tab (§16). The

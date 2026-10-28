@@ -82,6 +82,9 @@ class ChannelState:
     last_seen: float = field(default_factory=time.monotonic)
     last_value: float | None = None
     stale: bool = False
+    # When this channel became unreadable (bad quality or silent), for a
+    # channel under an `unreadable:` rule with a delay. None while readable.
+    bad_since: float | None = None
 
 
 # How many notifications may wait for the gateway before the engine starts
@@ -130,6 +133,7 @@ class AlarmEngine:
         self.routing = alarms.get("routing") or {}
         self.staleness = alarms.get("staleness") or {}
         self.switchable = frozenset(alarms.get("switchable") or [])
+        self.unreadable = self._unreadable_rules(alarms)
 
         self.stale_after = float(self.defaults.get("stale_after_seconds", 60))
         self.min_repeat_s = float(self.defaults.get("min_repeat_minutes", 15)) * 60
@@ -149,6 +153,51 @@ class AlarmEngine:
         # because a queue nobody drains is worse than no queue.
         self._outbox: queue.Queue | None = None
         self._notify_thread: threading.Thread | None = None
+
+    # ------------------------------------------------- unreadable channels
+
+    @staticmethod
+    def _unreadable_rules(alarms: dict) -> dict[str, dict]:
+        """`unreadable:` in alarms.yaml, by channel.
+
+        The default - any unreadable channel is a major alarm at once - is
+        right for a sensor the plant depends on and wrong for an instrument
+        used on demand. On 28 October 2026 the RGA missed a few HTTP requests
+        a dozen times; each time all eight of its channels went major, with
+        eight flight-recorder dumps, and came back 20 s later. A group names
+        the one channel that speaks for all of them (`alarm_on`), how long it
+        must be unreadable first (`after_seconds`), and at what severity and
+        to whom. The others in the group do not alarm on being unreadable at
+        all; their thresholds, if any, still apply to their values.
+        """
+        rules = {}
+        for name, spec in (alarms.get("unreadable") or {}).items():
+            members = list(spec.get("channels") or [])
+            rep = spec.get("alarm_on") or (members[0] if members else None)
+            rule = {"group": name, "alarm_on": rep,
+                    "after_s": float(spec.get("after_seconds", 0)),
+                    "severity": str(spec.get("severity", "major")),
+                    "notify": list(spec.get("notify") or ["email"])}
+            for ch in set(members) | ({rep} if rep else set()):
+                rules[ch] = rule
+        return rules
+
+    def _unreadable_alarm(self, state: ChannelState, rule: dict, label: str,
+                          value: float | None, since: float | None = None) -> None:
+        """An unreadable reading (or silence) on a channel under a rule."""
+        if state.channel != rule["alarm_on"]:
+            # Spoken for by the group's channel. Withdraw an unreadable alarm
+            # it may still carry from before the rule existed.
+            if state.state != "ok" and (state.threshold == "staleness" or
+                                        str(state.threshold or "").startswith("quality=")):
+                self._transition(state, "ok", None, value)
+            return
+        now = time.monotonic()
+        if state.bad_since is None:
+            state.bad_since = since if since is not None else now
+        if now - state.bad_since < rule["after_s"]:
+            return
+        self._transition(state, rule["severity"], label, value)
 
     # ------------------------------------------------------------- evaluation
 
@@ -286,9 +335,15 @@ class AlarmEngine:
             # A reading that is not OK is itself an alarm condition: the
             # sensor is not reporting, which is not the same as being fine.
             if m.quality is not Quality.OK or m.value is None:
+                rule = self.unreadable.get(m.channel)
+                if rule is not None:
+                    self._unreadable_alarm(state, rule, f"quality={m.quality.value}",
+                                           m.value)
+                    return
                 self._transition(state, "major", f"quality={m.quality.value}",
                                   m.value)
                 return
+            state.bad_since = None
 
             threshold, severity = self._threshold_for(
                 m.channel, m.value, state.threshold)
@@ -489,6 +544,10 @@ class AlarmEngine:
                           description, context, utcnow())
 
     def _routes_for(self, state: ChannelState) -> list[str]:
+        rule = self.unreadable.get(state.channel)
+        if rule is not None and (state.threshold == "staleness" or
+                                 str(state.threshold or "").startswith("quality=")):
+            return list(rule["notify"])
         limits = self.thresholds.get(state.channel) or {}
         spec = limits.get(state.threshold or "") or {}
         if spec.get("notify"):
@@ -510,6 +569,19 @@ class AlarmEngine:
         with self._lock:
             for state in self._states.values():
                 age = now - state.last_seen
+                rule = self.unreadable.get(state.channel)
+                if rule is not None:
+                    # Silence counts from the last reading; the group's
+                    # channel alarms once it has lasted `after_seconds` (and
+                    # at least the ordinary stale time), the others never.
+                    if (age > max(self.stale_after, rule["after_s"])
+                            and not state.stale):
+                        state.stale = True
+                        log.warning("%s has not been published for %.0fs — stale",
+                                    state.channel, age)
+                        self._unreadable_alarm(state, rule, "staleness", None,
+                                               since=state.last_seen)
+                    continue
                 if age > self.stale_after and not state.stale:
                     state.stale = True
                     log.warning("%s has not been published for %.0fs — stale",
@@ -537,6 +609,7 @@ class AlarmEngine:
         self.routing = alarms.get("routing") or {}
         self.staleness = alarms.get("staleness") or {}
         self.switchable = frozenset(alarms.get("switchable") or [])
+        self.unreadable = self._unreadable_rules(alarms)
         self.stale_after = float(self.defaults.get("stale_after_seconds", 60))
         self.min_repeat_s = float(self.defaults.get("min_repeat_minutes", 15)) * 60
         self.hysteresis_fraction = float(self.defaults.get("hysteresis", 0.02))

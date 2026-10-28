@@ -289,6 +289,29 @@ def _check_switchable(alarms: dict, channels: dict) -> None:
             raise ConfigError(f"alarms.yaml: switchable {name!r} has no thresholds")
 
 
+def _check_unreadable(alarms: dict, channels: dict) -> None:
+    """`unreadable` groups in alarms.yaml. A channel name that is not a
+    channel is a typo, and a typo here would leave that channel on the
+    default rule - a major alarm at once - without anybody noticing."""
+    groups = alarms.get("unreadable") or {}
+    if not isinstance(groups, dict):
+        raise ConfigError("alarms.yaml: `unreadable` must map group names to rules")
+    for group, rule in groups.items():
+        members = (rule or {}).get("channels") or []
+        rep = (rule or {}).get("alarm_on")
+        if not members or not rep:
+            raise ConfigError(f"alarms.yaml: unreadable {group!r} needs channels and alarm_on")
+        for name in list(members) + [rep]:
+            if name not in channels:
+                raise ConfigError(f"alarms.yaml: unreadable {group!r}: {name!r} is not a channel")
+        if rep not in members:
+            raise ConfigError(f"alarms.yaml: unreadable {group!r}: alarm_on {rep!r} "
+                              "is not one of its channels")
+        if str(rule.get("severity", "major")) not in ("minor", "major", "critical"):
+            raise ConfigError(f"alarms.yaml: unreadable {group!r}: severity must be "
+                              "minor, major or critical")
+
+
 def load(config_dir: Path | str | None = None) -> Config:
     """Load every configuration file, validate, and compute the config hash."""
     d = Path(config_dir) if config_dir else CONFIG_DIR
@@ -304,6 +327,7 @@ def load(config_dir: Path | str | None = None) -> Config:
 
     channels = _parse_channels(raw_channels, devices)
     _check_switchable(alarms, channels)
+    _check_unreadable(alarms, channels)
 
     # hv_defaults.yaml is optional and excluded from the hash, for the same
     # reason recipients.yaml is: it does not affect the data. A default is a

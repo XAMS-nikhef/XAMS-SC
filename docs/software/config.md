@@ -111,7 +111,10 @@ and complains; it has no code that could change them.
 
 Thresholds, four per channel, EPICS-style — `lolo`, `low`, `high`, `hihi` —
 each with a severity and who to notify. Plus `defaults` (hysteresis, repeat
-interval, `stale_after_seconds`) and a `staleness` block.
+interval, `stale_after_seconds`), a `staleness` block, `switchable` alarms and
+`unreadable` groups ([one alarm for a group of channels that may be
+unreadable for a while](alarms.md#unreadable-groups-one-alarm-later-quieter),
+the RGA's).
 
 Editing a threshold silently changes what the system protects against, which
 is why this file is in git and applied with an explicit `xams-ctl reload`.
