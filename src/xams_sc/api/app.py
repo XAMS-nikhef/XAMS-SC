@@ -1335,7 +1335,10 @@ def create_app(broker: str = "127.0.0.1", port: int = 1883, *,
         hv = []
         for spec in state.config.devices.get("caen", []) or []:
             for ch in state.config.channels.values():
-                if ch.device != spec["id"] or ch.kind != "hv_vmon":
+                # Not a disabled channel: it is not read, and the old spare
+                # (hv_2 ch 1, 14-28 Oct 2026) and the NaI share their index
+                # with the gate and the SiPM equalizer (28 October 2026).
+                if ch.device != spec["id"] or ch.kind != "hv_vmon" or not ch.enabled:
                     continue
                 hv.append({
                     "vmon": ch.name,
