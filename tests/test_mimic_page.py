@@ -343,3 +343,11 @@ def test_the_ln2_dewar_has_its_bubble():
     value = re.search(r'<text id="v-ln2_mass"[^>]*>', svg).group(0)
     assert 'data-unit="kg"' in value and 'data-digits="0"' in value
     assert 'id="u-ln2_mass"' in svg          # in a bubble: unit on its own line
+
+
+def test_the_hv_column_leaves_out_disabled_channels(page):
+    """28 October 2026: the old spare (hv_2 ch 1, 14-28 Oct) and the NaI are
+    disabled and share their index with the gate and the SiPM equalizer; they
+    are not read, so they have no row beside the drawing."""
+    assert "s-hv_spare_vmon" not in page and "s-hv_nai_vmon" not in page
+    assert "s-hv_sipm_eq_vmon" in page and "s-hv_gate_vmon" in page
