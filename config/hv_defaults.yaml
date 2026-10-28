@@ -20,6 +20,6 @@ defaults:
   hv_ts_vset: -100.0
   hv_bs_vset: -1000.0
   hv_cathode_vset: -2450.0
-  hv_gate_vset: 303.0
+  hv_gate_vset: -2000.0
   hv_anode_vset: 2250.0
   hv_nai_vset: 70.0

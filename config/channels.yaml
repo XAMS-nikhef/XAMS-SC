@@ -319,42 +319,44 @@ channels:
      description: "bottom screen current"}
 
   # ------------------------------------------------------------------
-  # CAEN hv_2 — serial 79. Cathode and gate negative; anode and NaI positive.
+  # CAEN hv_2 — serial 79. Since 28 October 2026: ch0 cathode (-), ch1 gate (-),
+  # ch2 anode (+), ch3 SiPM equalizer (-).
   # ------------------------------------------------------------------
   - {name: hv_cathode_vmon, device: hv_2, phys: 0, kind: hv_vmon, unit: V, sign: -1,
      legacy: "Cathode", limits: {min: -4000.0, max: 0.0}, description: "TPC cathode"}
   - {name: hv_cathode_imon, device: hv_2, phys: 0, kind: hv_imon, unit: uA,
      description: "TPC cathode current"}
-  # THE GATE MOVED from hv_2 channel 1 to channel 3 on 14 October 2026 (the NaI
-  # detector's channel; the NaI is no longer powered from here and channel 1 is
-  # disconnected). The names stay hv_gate_*: the history, the run snapshots on
-  # the DAQ side and the analysis all address the gate by name, not by channel.
-  #
-  # AND THE GATE IS POSITIVE (CM-B, the SiPM-neutral operating point of the
-  # short-fill plan, 12 October 2026): the TPC is shifted so that the grounded
-  # SiPMs sit ~50 V below their surroundings - anode +2503, gate +303, cathode
-  # -215, bottom screen -65, top screen 0 V. A positive gate is why it is on
-  # the NaI's (positive) channel. Limit +400 V (the plan asks for >= +350 V).
-  # When the gate goes back to a negative supply (CM-A), sign, limits and the
-  # default below flip back, and devices.yaml with them.
-  - {name: hv_gate_vmon, device: hv_2, phys: 3, kind: hv_vmon, unit: V, sign: 1,
-     legacy: "Gate", limits: {min: 0.0, max: 400.0}, description: "TPC gate"}
-  - {name: hv_gate_imon, device: hv_2, phys: 3, kind: hv_imon, unit: uA,
+  # THE GATE, hv_2 channel 1, NEGATIVE (28 October 2026: rewired back, CM-A).
+  # History: channel 1 negative until 14 October 2026; channel 3 and POSITIVE
+  # (+303 V, CM-B, the SiPM-neutral point of the short-fill plan) from 14 to
+  # 28 October; channel 1 negative again since. The names stay hv_gate_*
+  # throughout - the history, the run snapshots and the analysis address the
+  # gate by name, not by channel - so the positive period is in the same
+  # series, with positive values.
+  - {name: hv_gate_vmon, device: hv_2, phys: 1, kind: hv_vmon, unit: V, sign: -1,
+     legacy: "Gate", limits: {min: -3750.0, max: 0.0}, description: "TPC gate"}
+  - {name: hv_gate_imon, device: hv_2, phys: 1, kind: hv_imon, unit: uA,
      description: "TPC gate current"}
-  # hv_2 channel 1: NOT USED since the gate moved to channel 3 (14 October
-  # 2026), its output disconnected. Kept on the list so /hv shows the whole
-  # supply; still a NEGATIVE channel on the board. Its setpoint may only be
-  # 0 V (limits 0..0), so it cannot be energised to a voltage from here.
-  - {name: hv_spare_vmon, device: hv_2, phys: 1, kind: hv_vmon, unit: V, sign: -1,
-     limits: {min: -3750.0, max: 0.0}, description: "hv_2 ch 1 - not used (spare)", on_pid: false}
-  - {name: hv_spare_imon, device: hv_2, phys: 1, kind: hv_imon, unit: uA, on_pid: false,
-     description: "hv_2 ch 1 - not used (spare), current"}
+  # hv_2 channel 1 was a SPARE (disconnected) from 14 to 28 October 2026, while
+  # the gate was on channel 3. It carries the gate again; disabled, not
+  # removed, so its two weeks of history keep their name.
+  - {name: hv_spare_vmon, device: hv_2, phys: 1, kind: hv_vmon, unit: V, sign: -1, enabled: false,
+     limits: {min: -3750.0, max: 0.0}, description: "hv_2 ch 1 - spare 14-28 Oct 2026 (now the gate)", on_pid: false}
+  - {name: hv_spare_imon, device: hv_2, phys: 1, kind: hv_imon, unit: uA, on_pid: false, enabled: false,
+     description: "hv_2 ch 1 - spare 14-28 Oct 2026 (now the gate), current"}
   - {name: hv_anode_vmon, device: hv_2, phys: 2, kind: hv_vmon, unit: V, sign: 1,
      legacy: "Anode", limits: {min: 0.0, max: 4500.0}, description: "TPC anode"}
   - {name: hv_anode_imon, device: hv_2, phys: 2, kind: hv_imon, unit: uA,
      description: "TPC anode current"}
+  # SiPM EQUALIZER, hv_2 channel 3, NEGATIVE (28 October 2026, polarity switched
+  # on the board from + to -). Board MAXV 1000; software limit -1000..0 V.
+  # Not on the P&ID (no place drawn for it yet).
+  - {name: hv_sipm_eq_vmon, device: hv_2, phys: 3, kind: hv_vmon, unit: V, sign: -1,
+     limits: {min: -1000.0, max: 0.0}, description: "SiPM equalizer", on_pid: false}
+  - {name: hv_sipm_eq_imon, device: hv_2, phys: 3, kind: hv_imon, unit: uA, on_pid: false,
+     description: "SiPM equalizer current"}
   # NaI detector: no HV from the slow control since 14 October 2026 (its
-  # channel now carries the gate). Disabled, not removed, so its history keeps
+  # channel carried the gate until 28 October, now the SiPM equalizer). Disabled, not removed, so its history keeps
   # its name; re-enable with its own channel if it is powered from here again.
   - {name: hv_nai_vmon, device: hv_2, phys: 3, kind: hv_vmon, unit: V, sign: 1, enabled: false,
      legacy: "NaI", limits: {min: 0.0, max: 1000.0}, description: "external NaI detector"}
@@ -390,10 +392,12 @@ channels:
      description: "bottom screen status word"}
   - {name: hv_cathode_stat, device: hv_2, phys: 0, kind: hv_stat, unit: bits,
      description: "TPC cathode status word"}
-  - {name: hv_gate_stat, device: hv_2, phys: 3, kind: hv_stat, unit: bits,
+  - {name: hv_gate_stat, device: hv_2, phys: 1, kind: hv_stat, unit: bits,
      description: "TPC gate status word"}
-  - {name: hv_spare_stat, device: hv_2, phys: 1, kind: hv_stat, unit: bits, on_pid: false,
-     description: "hv_2 ch 1 - not used (spare), status word"}
+  - {name: hv_spare_stat, device: hv_2, phys: 1, kind: hv_stat, unit: bits, on_pid: false, enabled: false,
+     description: "hv_2 ch 1 - spare 14-28 Oct 2026 (now the gate), status word"}
+  - {name: hv_sipm_eq_stat, device: hv_2, phys: 3, kind: hv_stat, unit: bits, on_pid: false,
+     description: "SiPM equalizer status word"}
   - {name: hv_anode_stat, device: hv_2, phys: 2, kind: hv_stat, unit: bits,
      description: "TPC anode status word"}
   - {name: hv_nai_stat, device: hv_2, phys: 3, kind: hv_stat, unit: bits, enabled: false,
@@ -439,10 +443,12 @@ channels:
      limits: {min: -2000.0, max: 0.0}, default_setpoint: -600.0, description: "bottom screen setpoint"}
   - {name: hv_cathode_vset, device: hv_2, phys: 0, kind: hv_vset, unit: V, sign: -1,
      limits: {min: -3500.0, max: 0.0}, default_setpoint: -2250.0, description: "TPC cathode setpoint"}
-  - {name: hv_gate_vset, device: hv_2, phys: 3, kind: hv_vset, unit: V, sign: 1,
-     limits: {min: 0.0, max: 400.0}, default_setpoint: 303.0, description: "TPC gate setpoint"}
-  - {name: hv_spare_vset, device: hv_2, phys: 1, kind: hv_vset, unit: V, sign: -1, on_pid: false,
-     limits: {min: 0.0, max: 0.0}, description: "hv_2 ch 1 - not used (spare), setpoint"}
+  - {name: hv_gate_vset, device: hv_2, phys: 1, kind: hv_vset, unit: V, sign: -1,
+     limits: {min: -3750.0, max: 0.0}, default_setpoint: -1750.0, description: "TPC gate setpoint"}
+  - {name: hv_spare_vset, device: hv_2, phys: 1, kind: hv_vset, unit: V, sign: -1, on_pid: false, enabled: false,
+     limits: {min: 0.0, max: 0.0}, description: "hv_2 ch 1 - spare 14-28 Oct 2026 (now the gate), setpoint"}
+  - {name: hv_sipm_eq_vset, device: hv_2, phys: 3, kind: hv_vset, unit: V, sign: -1, on_pid: false,
+     limits: {min: -1000.0, max: 0.0}, description: "SiPM equalizer setpoint"}
   - {name: hv_anode_vset, device: hv_2, phys: 2, kind: hv_vset, unit: V, sign: 1,
      limits: {min: 0.0, max: 4500.0}, default_setpoint: 4200.0, description: "TPC anode setpoint"}
   - {name: hv_nai_vset, device: hv_2, phys: 3, kind: hv_vset, unit: V, sign: 1, enabled: false,

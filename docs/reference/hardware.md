@@ -7,7 +7,7 @@ Verified 17 September 2026.
 | cDAQ-9174 | serial `20C5E1C`, modules 9207 / 9216 / 9216 / 9226 |
 | | 19 live channels: 6 voltage, 13 RTD (`tt202` failed, awaiting replacement) |
 | CAEN DT1470ET | serial **19198**, firmware 1.08 — PMT bottom, PMT top, top screen, bottom screen |
-| CAEN DT1470ET | serial **79**, firmware 1.04 — cathode, (ch 1 disconnected), anode, gate (ch 3, **positive**, moved from ch 1 on 14 Oct 2026 for the SiPM-neutral point CM-B; NaI no longer powered from here) |
+| CAEN DT1470ET | serial **79**, firmware 1.04 — cathode (ch 0, −), gate (ch 1, −), anode (ch 2, +), SiPM equalizer (ch 3, −, `hv_sipm_eq`), since 28 Oct 2026. From 14 to 28 Oct the gate was on ch 3, **positive** (CM-B), with ch 1 a spare; `hv_gate_*` covers both periods. NaI no longer powered from here |
 | Lake Shore 335 | `335A12T` on COM6 |
 | UPS | APC, `3S2005X18782`, USB HID |
 | Turbo tap | EXSYS EX-13009, FTDI `0403:6001` serial `DIBIURQ3`, listen-only on the HiPace 80 RS-485 |

@@ -206,7 +206,7 @@ class TestHvOutput:
         assert rc == 1
         assert "hv_anode_vset" in out
         assert "the front-panel switch is off" in out
-        assert "1 of 7 refused or unanswered" in out  # NaI disabled, spare skipped by "all on"
+        assert "1 of 8 refused or unanswered" in out  # NaI and spare disabled; SiPM equalizer added 28 Oct 2026
 
     def test_the_detail_is_shown_when_the_service_gives_one(self, cli, capsys):
         answers(cli, ACK_HV_OUTPUT, {
