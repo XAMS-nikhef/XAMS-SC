@@ -50,7 +50,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..bus import ACK_READOUT, STATUS_READOUT, TOPIC_AUDIT, TOPIC_READOUT
+from ..bus import ACK_READOUT, STATUS_READOUT, TOPIC_AUDIT, TOPIC_MEAS, TOPIC_READOUT
 from ..config import ROOT, Channel, Config
 from ..model import Measurement, Quality, iso, utcnow
 from ..readout import switchable_modules
@@ -186,6 +186,15 @@ class CdaqService(BaseService):
         self._switch_lock = threading.Lock()
         self._restore_readout()
         self._build_tasks()
+        # THE HV SIDE OF THE PT1000 LOCK (28 October 2026): a readout is not
+        # switched back on while any HV output is energised, or while that is
+        # not known - the order is HV off, reconnect, readout on. The CAEN
+        # status words, from the bus; see `_hv_lock`.
+        self._hv_stat: dict[str, Measurement] = {}
+        self._hv_stat_names = [c.name for c in config.enabled_channels()
+                               if c.kind == "hv_stat"]
+        for name in self._hv_stat_names:
+            self.bus.subscribe(f"{TOPIC_MEAS}/{name}", self._on_hv_stat)
         self.bus.subscribe(TOPIC_READOUT, self._on_readout_command)
         self.publish_readout()
 
@@ -455,6 +464,43 @@ class CdaqService(BaseService):
         self.bus.publish_raw(STATUS_READOUT, json.dumps(
             self.readout_view(), separators=(",", ":")), retain=True)
 
+    def _on_hv_stat(self, topic: str, payload: str) -> None:
+        try:
+            m = Measurement.from_payload(json.loads(payload))
+        except Exception:
+            return
+        self._hv_stat[m.channel] = m
+
+    # A status word older than this is no evidence of what the output is
+    # doing now. The CAEN service publishes every 10 s and at once on change.
+    HV_STAT_MAX_AGE_S = 60.0
+
+    def _hv_lock(self) -> str | None:
+        """Why a readout may not be switched ON now, or None.
+
+        Refused while any HV output is energised (STAT bit 0) and while that
+        cannot be told - a missing, bad or old status word (user, 28 October
+        2026: switch the HV off, reconnect the sensors, then the readout).
+        """
+        from ..hv_status import is_energised
+        now = utcnow()
+        unknown, energised = [], []
+        for name in self._hv_stat_names:
+            m = self._hv_stat.get(name)
+            if (m is None or m.quality is not Quality.OK or m.value is None
+                    or (now - m.t).total_seconds() > self.HV_STAT_MAX_AGE_S):
+                unknown.append(name.replace("hv_", "").replace("_stat", ""))
+            elif is_energised(int(m.value)):
+                energised.append(name.replace("hv_", "").replace("_stat", ""))
+        if energised:
+            return ("HV is ON (%s). Switch the HV off and reconnect the sensors "
+                    "first - then switch the readout on" % ", ".join(energised))
+        if unknown:
+            return ("the HV state is unknown for %s (no recent status from the "
+                    "caen service). The readout can only be switched on with "
+                    "all HV known to be off" % ", ".join(unknown))
+        return None
+
     def _on_readout_command(self, topic: str, payload: str) -> None:
         """On the bus thread: hand the work to a thread of its own. Switching
         off waits for a read in progress (seconds for an RTD module), which
@@ -499,6 +545,12 @@ class CdaqService(BaseService):
         mod = next((m for m in self._modules if m.alias == alias), None)
         with self._switch_lock:
             was = self.readout_on(alias)
+            if enabled and not was:
+                why = self._hv_lock()
+                if why:
+                    log.warning("%s: readout NOT switched on for %s: %s",
+                                alias, by, why)
+                    return {"ok": False, "module": alias, "was": was, "reason": why}
             if mod is not None and not self.simulate and enabled != was:
                 if enabled:
                     reason = self._open_module(mod)

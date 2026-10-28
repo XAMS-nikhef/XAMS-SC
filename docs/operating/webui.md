@@ -329,9 +329,22 @@ that is still grounded then reads as an open circuit and alarms, which is the
 point.
 
 The order: switch off, then disconnect and ground, then HV on; back: HV off,
-reconnect, then switch on. When an HV output is energised while the readout is
-still on, the strip turns amber and says so — a hint, never a lock. The switch
-is confirmed, audited with your name, kept by the cdaq service across a
+reconnect, then switch on. **The order is locked, both ways** (28 October 2026,
+so the sensors cannot be forgotten on the cryostat):
+
+- **No HV channel can be switched ON while the PT1000 readout is ON**, or while
+  its state is unknown (the cdaq service has not reported it). Every channel,
+  PMTs included. Refused by the caen service, so the page and `xams-ctl hv-on`
+  alike get the reason in red. Switching OFF is never refused.
+- **The readout cannot be switched ON while any HV output is energised**, or
+  while the HV state is unknown or older than a minute (no recent status word
+  from the caen service). Refused by the cdaq service. Switching the readout
+  off is never refused.
+
+These are refusals of a command, not an interlock: nothing switches anything
+off, and the supplies' own protection is untouched (§10). The strip turns amber
+if HV is on while the readout is on anyway (switched on before the lock). The
+switch is confirmed, audited with your name, kept by the cdaq service across a
 restart (`data/cdaq_readout.json`), and the daily report says "OFF since …"
 every morning it stays off. While the cdaq service has not reported the state
 the strip says *state unknown* and offers no button. From a terminal:

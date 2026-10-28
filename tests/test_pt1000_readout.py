@@ -72,6 +72,16 @@ def service(tmp_path):
     svc._close_tasks()
 
 
+def hv_states(svc, word=1024, age_s=0.0):
+    """Every CAEN status word as the bus would hand it to the cdaq service.
+    1024 is bit 10 alone: disabled at the supply, output not energised."""
+    from datetime import timedelta
+    for name in svc._hv_stat_names:
+        svc._hv_stat[name] = Measurement(t=utcnow() - timedelta(seconds=age_s),
+                                         channel=name, value=float(word),
+                                         unit="bits", quality=Quality.OK)
+
+
 def mod(svc, alias):
     return next(m for m in svc._modules if m.alias == alias)
 
@@ -116,6 +126,7 @@ def test_off_survives_a_restart(service):
 def test_on_builds_the_task_again(service, monkeypatch):
     svc, bus, _ = service
     svc.set_readout("9226", False, "apc")
+    hv_states(svc)
     m = mod(svc, "9226")
 
     def fake_open(module):
@@ -134,6 +145,7 @@ def test_on_builds_the_task_again(service, monkeypatch):
 def test_a_task_that_will_not_start_leaves_it_off(service, monkeypatch):
     svc, _, _ = service
     svc.set_readout("9226", False, "apc")
+    hv_states(svc)
     monkeypatch.setattr(svc, "_open_module", lambda module: "device not present")
     ack = svc.set_readout("9226", True, "apc")
     assert not ack["ok"] and "device not present" in ack["reason"]

@@ -335,9 +335,12 @@ body[data-hv-window="21600"] .hv-plot button[data-window="21600"] {
    read, published or alarmed on, and every page shows them as "off". A strip
    rather than a fourth tile, and directly above the HV: switching it is part
    of switching the HV on, and the reminder belongs where that happens. It
-   turns amber when an HV output is energised while the readout is still on -
-   a hint, never a lock (§10). Unknown (the cdaq service has not said) offers
-   no button. #}
+   turns amber when an HV output is energised while the readout is still on
+   (only possible with HV switched on before the lock existed). THE LOCK
+   (28 October 2026): the caen service refuses any HV ON while the readout is
+   on or unknown, and the cdaq service refuses the readout ON while any HV is
+   on or unknown - refusals, shown in red above the HV tables. Unknown (the
+   cdaq service has not said) offers no button. #}
 <div id="readout">
 {% for r in readouts %}
 <div class="card" style="margin:1.2rem 0 0 0{{ ';border-color:#d29922' if hv_energised and r.enabled }}">
@@ -383,7 +386,9 @@ body[data-hv-window="21600"] .hv-plot button[data-window="21600"] {
   {% endif %}
   <div class="note" style="margin-top:.4rem">
     Order: switch off, then disconnect and ground the sensors, then HV on.
-    Back: HV off, reconnect, then switch on. Also
+    Back: HV off, reconnect, then switch on. <strong>Locked both ways:</strong>
+    no HV channel can be switched on while this is ON (or unknown), and it
+    cannot be switched on while any HV output is on. Also
     <code>xams-ctl readout {{ r.switch }} off|on --by &lt;you&gt;</code>.
   </div>
 </div>

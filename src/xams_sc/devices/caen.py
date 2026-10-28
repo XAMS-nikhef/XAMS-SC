@@ -58,7 +58,7 @@ import time
 
 import serial
 
-from ..bus import (ACK_HV_CLEAR, ACK_HV_OUTPUT, ACK_HV_VSET, TOPIC_AUDIT,
+from ..bus import (ACK_HV_CLEAR, ACK_HV_OUTPUT, ACK_HV_VSET, STATUS_READOUT, TOPIC_AUDIT,
                    TOPIC_HV_CLEAR, TOPIC_HV_OUTPUT, TOPIC_HV_SWITCHING,
                    TOPIC_HV_TRIP, TOPIC_HV_VSET)
 from ..config import Config
@@ -478,6 +478,12 @@ class CaenService(BaseService):
         #   _history   the last minute of (time, vset, vmon, imon, word).
         self._tripped: dict[str, dict] = {}
         self._cleared: dict[str, dict] = {}
+        # THE PT1000 LOCK (28 October 2026, A.P. Colijn): no HV channel may be
+        # switched ON while a switchable cDAQ readout (the PT1000s) is ON, so
+        # the sensors cannot be forgotten on the cryostat when the HV comes
+        # up. The state is the cdaq service's retained STATUS_READOUT; None
+        # until it has spoken, and unknown refuses too. See `_readout_lock`.
+        self._readout: dict | None = None
         self._history: dict[str, collections.deque] = {}
         self._flag_hits: dict[str, int] = {}
         self._collapse_hits: dict[str, int] = {}
@@ -1471,6 +1477,14 @@ class CaenService(BaseService):
 
         # A tripped channel stays off until somebody has acknowledged it.
         # Turning it back on without looking is how a discharge becomes two.
+        # The PT1000 lock: refused before the supply is even asked.
+        if wanted_on:
+            why = self._readout_lock()
+            if why:
+                self._refuse(name, why, actor, old="off", new="on",
+                             ack_topic=ACK_HV_OUTPUT, action="caen_output")
+                return
+
         if wanted_on and name in self._tripped:
             record = self._tripped[name]
             self._refuse(
@@ -1764,7 +1778,42 @@ class CaenService(BaseService):
                     describe_status(after_word) if after_word is not None
                     else None, "ok", detail, actor, action="caen_clear")
 
+    def _on_readout_status(self, topic: str, payload: str) -> None:
+        from ..readout import parse_status
+        self._readout = parse_status(payload)
+
+    def _readout_lock(self) -> str | None:
+        """Why switching ANY HV channel on is refused now, or None.
+
+        Every channel, not a chosen few (user, 28 October 2026: "the
+        safest"). Refused while a switchable readout - the PT1000s - is ON,
+        and while its state is UNKNOWN: no report from the cdaq service is no
+        evidence that the sensors were disconnected. A refusal, not an
+        interlock: the supply's own protection is untouched (§10), and
+        switching OFF is never refused.
+        """
+        from ..readout import switchable_modules
+        modules = switchable_modules(self.config)
+        if not modules:
+            return None
+        status = self._readout
+        unknown = [spec["label"] for alias, spec in modules.items()
+                   if status is None or alias not in status]
+        if unknown:
+            return ("the state of the %s is unknown (the cdaq service has not "
+                    "reported it). HV can only be switched on with it known to "
+                    "be OFF" % " and ".join(unknown))
+        on = [(spec["label"], spec["switch"]) for alias, spec in modules.items()
+              if bool(status[alias].get("enabled", True))]
+        if on:
+            labels = " and ".join(label for label, _ in on)
+            return ("the %s is ON. Switch it off first (Control page, or "
+                    "xams-ctl readout %s off), and disconnect and ground the "
+                    "sensors - then switch the HV on" % (labels, on[0][1]))
+        return None
+
     def run(self) -> int:
+        self.bus.subscribe(STATUS_READOUT, self._on_readout_status)
         self.bus.subscribe(TOPIC_HV_VSET, self._handle_vset)
         self.bus.subscribe(TOPIC_HV_OUTPUT, self._handle_output)
         self.bus.subscribe(TOPIC_HV_CLEAR, self._handle_clear)
