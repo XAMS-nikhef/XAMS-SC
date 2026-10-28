@@ -106,6 +106,27 @@ channels:
 # data/alarm_armed.json and survive a restart.
 switchable: [ln2_mass]
 
+# UNREADABLE CHANNELS that must not alarm the default way (staleness above:
+# major, at once). A group names the one channel that speaks for all of them
+# (`alarm_on`), how long it must be unreadable - bad quality, or silent -
+# before it alarms, and at what severity to whom. The other channels of the
+# group do not alarm on being unreadable at all; any thresholds they have
+# still apply to their values.
+#
+# The RGA: used on demand, protects nothing (the p105 guard switches its
+# emission off by itself), and its HTTP server misses a request now and then.
+# On 28 October 2026 that was a dozen 20-s outages, each giving eight major
+# alarms and eight flight-recorder dumps. Now: one minor alarm, by email,
+# after three minutes without an answer. A.P. Colijn, 28 October 2026.
+unreadable:
+  rga:
+    channels: [rga_status, rga_emission, rga_em, rga_control, rga_hw_errors,
+               rga_hw_warnings, rga_tp_trips, rga_box_temp]
+    alarm_on: rga_status
+    after_seconds: 180
+    severity: minor
+    notify: [email]
+
 routing:
   sms:   {recipients: enabled}    # everyone enabled in recipients.yaml
   email: {recipients: enabled}

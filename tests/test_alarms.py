@@ -609,3 +609,114 @@ class TestOneAlarmSwitchedOff:
                 if t == "xams/status/armed"][-1]
         assert last["ln2_mass"]["enabled"] is False
         assert last["ln2_mass"]["by"] == "apc"
+
+
+# ================================================================ unreadable
+#
+# 28 October 2026: the RGA missed a few HTTP requests a dozen times; each time
+# all eight rga_* channels went major (eight dumps) and back 20 s later.
+
+RGA = ["rga_status", "rga_emission", "rga_em", "rga_control", "rga_hw_errors",
+       "rga_hw_warnings", "rga_tp_trips", "rga_box_temp"]
+
+
+def rga_engine(after=180.0, **defaults):
+    engine, bus, notifier = engine_with({}, **defaults)
+    alarms = dict(engine.config.alarms)
+    alarms["unreadable"] = {"rga": {"channels": RGA, "alarm_on": "rga_status",
+                                    "after_seconds": after, "severity": "minor",
+                                    "notify": ["email"]}}
+    engine.config.alarms = alarms
+    engine.reload(engine.config)
+    return engine, bus, notifier
+
+
+def rga_outage(engine):
+    for ch in RGA:
+        engine.on_measurement(reading(ch, None, Quality.ERROR))
+
+
+class TestAnUnreadableGroup:
+    def test_a_short_outage_raises_nothing(self):
+        engine, _, notifier = rga_engine(after=180)
+        rga_outage(engine)
+        assert engine.active() == [] and notifier.sent == []
+        for ch in RGA:
+            engine.on_measurement(reading(ch, 0.0))
+        assert engine.active() == []
+
+    def test_a_long_one_is_one_minor_alarm_by_email(self):
+        engine, _, notifier = rga_engine(after=0.05)
+        rga_outage(engine)
+        time.sleep(0.1)
+        rga_outage(engine)
+        (alarm,) = engine.active()
+        assert alarm.channel == "rga_status" and alarm.state == "minor"
+        assert notifier.sent and notifier.sent[0][1] == ("email",)
+
+    def test_it_clears_when_the_rga_answers_again(self):
+        engine, _, _ = rga_engine(after=0.05)
+        rga_outage(engine)
+        time.sleep(0.1)
+        rga_outage(engine)
+        engine.on_measurement(reading("rga_status", 17828752.0))
+        assert engine.active() == []
+
+    def test_the_delay_restarts_after_a_good_reading(self):
+        engine, _, _ = rga_engine(after=0.2)
+        rga_outage(engine)
+        time.sleep(0.15)
+        engine.on_measurement(reading("rga_status", 1.0))
+        rga_outage(engine)
+        time.sleep(0.1)
+        rga_outage(engine)
+        assert engine.active() == []
+
+    def test_silence_is_one_alarm_too_and_only_after_the_delay(self):
+        engine, _, _ = rga_engine(after=0.2, stale_after_seconds=0.05)
+        for ch in RGA:
+            engine.on_measurement(reading(ch, 0.0))
+        time.sleep(0.1)
+        engine.check_staleness()
+        assert engine.active() == []           # stale, but not yet 0.2 s
+        time.sleep(0.15)
+        engine.check_staleness()
+        (alarm,) = engine.active()
+        assert alarm.channel == "rga_status" and alarm.threshold == "staleness"
+
+    def test_other_channels_keep_the_default(self):
+        engine, _, _ = rga_engine()
+        engine.on_measurement(reading("tt103", None, Quality.ERROR))
+        assert engine.active()[0].state == "major"
+
+    def test_an_old_unreadable_alarm_on_a_member_is_withdrawn(self):
+        engine, _, _ = engine_with({})
+        engine.on_measurement(reading("rga_box_temp", None, Quality.ERROR))
+        assert engine.active()[0].channel == "rga_box_temp"
+        alarms = dict(engine.config.alarms)
+        alarms["unreadable"] = {"rga": {"channels": RGA, "alarm_on": "rga_status",
+                                        "after_seconds": 180, "severity": "minor"}}
+        engine.config.alarms = alarms
+        engine.reload(engine.config)
+        engine.on_measurement(reading("rga_box_temp", None, Quality.ERROR))
+        assert engine.active() == []
+
+
+class TestTheConfiguredRgaRule:
+    def test_alarms_yaml_has_it(self):
+        rule = load().alarms["unreadable"]["rga"]
+        assert rule["alarm_on"] == "rga_status" and rule["severity"] == "minor"
+        assert rule["after_seconds"] >= 120 and rule["notify"] == ["email"]
+        assert set(rule["channels"]) == set(RGA)
+
+    def test_a_typo_in_a_group_stops_the_load(self, tmp_path):
+        import shutil
+        import pytest
+        from xams_sc.config import CONFIG_DIR, ConfigError
+        for f in CONFIG_DIR.glob("*.yaml"):
+            shutil.copy(f, tmp_path / f.name)
+        text = (tmp_path / "alarms.yaml").read_text(encoding="utf-8")
+        (tmp_path / "alarms.yaml").write_text(
+            text.replace("rga_box_temp]", "rga_box_tmp]"), encoding="utf-8")
+        with pytest.raises(ConfigError, match="rga_box_tmp"):
+            load(tmp_path)
