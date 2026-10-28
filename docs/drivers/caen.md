@@ -166,6 +166,16 @@ perfectly reasonable thing to do.
 
 ---
 
+## No HV on while the PT1000s are read (28 October 2026)
+
+Switching **any** channel ON is refused while the PT1000 readout (the 9226,
+`xams/status/readout`, owned by the cdaq service) is ON, or while its state is
+unknown - so the sensors cannot be left connected to the cryostat when the HV
+comes up. The reason names the remedy (`xams-ctl readout pt1000 off`), and the
+refusal is acknowledged and audited like any other. Switching OFF is never
+refused. The other half is in the cdaq service: the readout cannot be switched
+on while any output is energised. See [the cDAQ driver](cdaq.md).
+
 ## LOCAL is invisible until you write
 
 `BDCTR` says `LOCAL` or `REMOTE`. In `LOCAL` the front panel has control:

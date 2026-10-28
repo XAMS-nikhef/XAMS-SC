@@ -83,6 +83,12 @@ grounded; read, they would give nothing but open-circuit errors and alarms.
   its task is used by its own thread alone, so closing it cannot pull it from
   under a read.
 
+**The lock (28 October 2026).** The readout is not switched back ON while any
+CAEN output is energised, or while that cannot be told (a status word missing,
+bad, or older than 60 s; the service follows every `hv_*_stat` on the bus).
+The caen service holds the other half: no HV channel ON while a switchable
+readout is ON or its state unknown. Off is never refused, on either side.
+
 The alarm engine withdraws the channels of a module that is off, and the web
 UI and the daily report show them as off rather than broken — see
 [the alarm engine](../software/alarms.md) and

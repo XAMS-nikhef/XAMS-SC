@@ -94,6 +94,15 @@ class FakeReader:
         return "REMOTE" if self.accepts else "LOCAL"
 
 
+
+@pytest.fixture(autouse=True)
+def pt1000_readout_off(monkeypatch):
+    """These tests are about switching, not about the PT1000 lock (28 October
+    2026), which refuses every ON while the readout is on or unknown. The
+    readout is taken as OFF here; the lock has its own tests
+    (test_pt1000_interlock.py)."""
+    monkeypatch.setattr(CaenService, "_readout_lock", lambda self: None)
+
 @pytest.fixture
 def service(tmp_path):
     svc = CaenService(load(), RecordingBus(), simulate=False, lock_dir=tmp_path)
