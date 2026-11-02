@@ -349,10 +349,11 @@ channels:
   - {name: hv_anode_imon, device: hv_2, phys: 2, kind: hv_imon, unit: uA,
      description: "TPC anode current"}
   # SiPM EQUALIZER, hv_2 channel 3, NEGATIVE (28 October 2026, polarity switched
-  # on the board from + to -). Board MAXV 1000; software limit -1000..0 V.
+  # on the board from + to -). Board MAXV 1500 since 2 November 2026 (was 1000);
+  # software limit -1500..0 V.
   # Not on the P&ID (no place drawn for it yet).
   - {name: hv_sipm_eq_vmon, device: hv_2, phys: 3, kind: hv_vmon, unit: V, sign: -1,
-     limits: {min: -1000.0, max: 0.0}, description: "SiPM equalizer", on_pid: false}
+     limits: {min: -1500.0, max: 0.0}, description: "SiPM equalizer", on_pid: false}
   - {name: hv_sipm_eq_imon, device: hv_2, phys: 3, kind: hv_imon, unit: uA, on_pid: false,
      description: "SiPM equalizer current"}
   # NaI detector: no HV from the slow control since 14 October 2026 (its
@@ -448,7 +449,7 @@ channels:
   - {name: hv_spare_vset, device: hv_2, phys: 1, kind: hv_vset, unit: V, sign: -1, on_pid: false, enabled: false,
      limits: {min: 0.0, max: 0.0}, description: "hv_2 ch 1 - spare 14-28 Oct 2026 (now the gate), setpoint"}
   - {name: hv_sipm_eq_vset, device: hv_2, phys: 3, kind: hv_vset, unit: V, sign: -1, on_pid: false,
-     limits: {min: -1000.0, max: 0.0}, description: "SiPM equalizer setpoint"}
+     limits: {min: -1500.0, max: 0.0}, description: "SiPM equalizer setpoint"}
   - {name: hv_anode_vset, device: hv_2, phys: 2, kind: hv_vset, unit: V, sign: 1,
      limits: {min: 0.0, max: 4500.0}, default_setpoint: 4200.0, description: "TPC anode setpoint"}
   - {name: hv_nai_vset, device: hv_2, phys: 3, kind: hv_vset, unit: V, sign: 1, enabled: false,
