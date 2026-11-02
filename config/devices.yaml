@@ -87,8 +87,9 @@ caen:
     # gate and equalizer negative, anode positive. The gate is back on channel
     # 1 (it was on channel 3, positive, 14-28 October for CM-B); channel 3's
     # polarity was switched to - on the board for the SiPM equalizer, ISET 10;
-    # its MAXV was raised on the board from 1000 to 1500 on 2 November 2026. Channel 1's MAXV, ISET, TRIP and ramps are not yet
-    # recorded here (it was a spare, polarity only) - add them.
+    # its MAXV was raised on the board from 1000 to 1500 on 2 November 2026.
+    # Channel 1's MAXV, ISET, TRIP and ramps are not yet recorded here (it was
+    # a spare, polarity only) - add them.
     # Read and alarmed on mismatch, never written (§8.3).
     expect:
       0: {pol: "-", maxv: 4000, rup: 25, rdw: 50,  trip: 10.0, iset: 10}
