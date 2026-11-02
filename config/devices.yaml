@@ -86,15 +86,16 @@ caen:
     # cathode / gate / anode / SiPM equalizer since 28 October 2026: cathode,
     # gate and equalizer negative, anode positive. The gate is back on channel
     # 1 (it was on channel 3, positive, 14-28 October for CM-B); channel 3's
-    # polarity was switched to - on the board for the SiPM equalizer and keeps
-    # MAXV 1000, ISET 10. Channel 1 (the gate) "same as the others" (user,
-    # 28 October 2026): MAXV 4000 like the cathode, ISET 10, TRIP 10, 25/50.
+    # polarity was switched to - on the board for the SiPM equalizer, ISET 10;
+    # its MAXV was raised on the board from 1000 to 1500 on 2 November 2026.
+    # Channel 1 (the gate) "same as the others" (user, 28 October 2026):
+    # MAXV 4000 like the cathode, ISET 10, TRIP 10, 25/50.
     # Read and alarmed on mismatch, never written (§8.3).
     expect:
       0: {pol: "-", maxv: 4000, rup: 25, rdw: 50,  trip: 10.0, iset: 10}
       1: {pol: "-", maxv: 4000, rup: 25, rdw: 50,  trip: 10.0, iset: 10}
       2: {pol: "+", maxv: 4500, rup: 25, rdw: 50,  trip: 10.0, iset: 10}
-      3: {pol: "-", maxv: 1000, rup: 25, rdw: 50,  trip: 10.0, iset: 10}
+      3: {pol: "-", maxv: 1500, rup: 25, rdw: 50,  trip: 10.0, iset: 10}
     # Channels plotted on /hv without their current: none since 14 October
     # 2026, when channel 3 went from the NaI (whose base divider current set
     # the scale) to the gate, whose current matters.
