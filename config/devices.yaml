@@ -87,12 +87,12 @@ caen:
     # gate and equalizer negative, anode positive. The gate is back on channel
     # 1 (it was on channel 3, positive, 14-28 October for CM-B); channel 3's
     # polarity was switched to - on the board for the SiPM equalizer and keeps
-    # MAXV 1000, ISET 10. Channel 1's MAXV, ISET, TRIP and ramps are not yet
-    # recorded here (it was a spare, polarity only) - add them.
+    # MAXV 1000, ISET 10. Channel 1 (the gate) "same as the others" (user,
+    # 28 October 2026): MAXV 4000 like the cathode, ISET 10, TRIP 10, 25/50.
     # Read and alarmed on mismatch, never written (§8.3).
     expect:
       0: {pol: "-", maxv: 4000, rup: 25, rdw: 50,  trip: 10.0, iset: 10}
-      1: {pol: "-"}             # the gate; limits still to be recorded
+      1: {pol: "-", maxv: 4000, rup: 25, rdw: 50,  trip: 10.0, iset: 10}
       2: {pol: "+", maxv: 4500, rup: 25, rdw: 50,  trip: 10.0, iset: 10}
       3: {pol: "-", maxv: 1000, rup: 25, rdw: 50,  trip: 10.0, iset: 10}
     # Channels plotted on /hv without their current: none since 14 October
