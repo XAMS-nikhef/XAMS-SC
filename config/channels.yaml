@@ -349,11 +349,12 @@ channels:
   - {name: hv_anode_imon, device: hv_2, phys: 2, kind: hv_imon, unit: uA,
      description: "TPC anode current"}
   # SiPM EQUALIZER, hv_2 channel 3, NEGATIVE (28 October 2026, polarity switched
-  # on the board from + to -). Board MAXV 1500 since 2 November 2026 (was 1000);
-  # software limit -1500..0 V.
+  # on the board from + to -). Board MAXV 1500 since 2 November 2026 (was 1000),
+  # 2000 since 3 November 2026 (S600A25 and beyond: SiPMs at -1490 V and more);
+  # software limit -2000..0 V.
   # Not on the P&ID (no place drawn for it yet).
   - {name: hv_sipm_eq_vmon, device: hv_2, phys: 3, kind: hv_vmon, unit: V, sign: -1,
-     limits: {min: -1500.0, max: 0.0}, description: "SiPM equalizer", on_pid: false}
+     limits: {min: -2000.0, max: 0.0}, description: "SiPM equalizer", on_pid: false}
   - {name: hv_sipm_eq_imon, device: hv_2, phys: 3, kind: hv_imon, unit: uA, on_pid: false,
      description: "SiPM equalizer current"}
   # NaI detector: no HV from the slow control since 14 October 2026 (its
