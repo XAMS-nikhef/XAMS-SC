@@ -178,7 +178,7 @@ def _number(value) -> str:
 
 
 def _limit_text(threshold, limits: dict | None, unit: str = "") -> str:
-    """"low (< 100 kg)" when the engine published the number, else "low".
+    """"below 100 kg" when the engine published the number, else the level name.
 
     The level name alone says which limit was crossed but not where it is;
     the number is what the reader compares the reading with.
@@ -187,9 +187,18 @@ def _limit_text(threshold, limits: dict | None, unit: str = "") -> str:
     value = (limits or {}).get(name)
     if not isinstance(value, (int, float)):
         return name
-    sign = "<" if name in _BELOW else (">" if name in _ABOVE else "")
     unit = f" {unit}" if unit else ""
-    return f"{name} ({sign} {value:g}{unit})" if sign else f"{name} ({value:g}{unit})"
+    if name in _BELOW:
+        return f"below {value:g}{unit}"
+    if name in _ABOVE:
+        return f"above {value:g}{unit}"
+    return f"{name} {value:g}{unit}"
+
+
+def _short(description: str) -> str:
+    """The name part of a description: "LN2 in the dewar: gross minus..." ->
+    "LN2 in the dewar". The rest explains the channel, not the alarm."""
+    return description.split(":")[0].strip()
 
 
 def _alarm_rows(alarms: list, state=None) -> list[tuple]:
@@ -198,10 +207,11 @@ def _alarm_rows(alarms: list, state=None) -> list[tuple]:
     The value in an alarm record is the reading when the alarm went OFF: the
     engine publishes it on a transition only, not while the channel stays in
     the same alarm. With `state` (the daily report) the row shows the reading
-    NOW next to it, so a report sent hours later does not show the onset
-    value as the current one (18 November 2026: the LN2 alarm row and the LN2
-    row of the same report disagreed). Without it (the alarm email, whose
-    context the engine fills with its latest values) the value is current.
+    NOW, large, and under it, small: severity, limit and the onset value - so
+    a report sent hours later does not show the onset value as the current
+    one (18 November 2026: the LN2 alarm row and the LN2 row of the same
+    report disagreed). Without it (the alarm email, whose context the engine
+    fills with its latest values) the value is current.
     """
     limits = state.limits() if state is not None else None
     rows = []
@@ -210,20 +220,29 @@ def _alarm_rows(alarms: list, state=None) -> list[tuple]:
         channel = a.get("channel", "?")
         label = channel
         if a.get("description"):
-            label = f"{label} - {a['description']}"
-        view = state.channel(channel) if state is not None else None
-        unit = view.unit if view is not None else ""
-        level = _esc(_limit_text(a.get("threshold"),
-                                 (limits or {}).get(channel), unit))
+            label = f"{label} - {_short(a['description'])}"
         if state is None:
-            detail = f"{severity.upper()} at {level}, now {_number(a.get('value'))}"
-        else:
-            now = (_esc(view.formatted()) + (f" {_esc(unit)}" if unit else "")
-                   if view is not None and view.healthy else "&mdash;")
-            detail = (f"{severity.upper()} at {level}, now {now} "
-                      f"(went off at {_number(a.get('value'))})")
+            detail = (f"{severity.upper()} at {_esc(a.get('threshold') or '?')}, "
+                      f"now {_number(a.get('value'))}")
+            if a.get("acknowledged"):
+                detail += " (acknowledged)"
+            rows.append((label, detail, colour_for(severity)))
+            continue
+        view = state.channel(channel)
+        unit = view.unit if view is not None else ""
+        now = (_esc(view.formatted()) + (f" {_esc(unit)}" if unit else "")
+               if view is not None and view.healthy else "&mdash;")
+        notes = [severity.upper(),
+                 _esc(_limit_text(a.get("threshold"),
+                                  (limits or {}).get(channel), unit))]
+        onset = a.get("value")
+        if isinstance(onset, (int, float)):
+            notes.append(f"went off at {onset:g}" + (f" {_esc(unit)}" if unit else ""))
         if a.get("acknowledged"):
-            detail += " (acknowledged)"
+            notes.append("acknowledged")
+        detail = (f'{now}<br><span style="font-size:12px;font-weight:400;color:{DIM};'
+                  f"font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;\">"
+                  f'{" &middot; ".join(notes)}</span>')
         rows.append((label, detail, colour_for(severity)))
     return rows
 
@@ -359,8 +378,12 @@ def _digest_text(state, when, word, detail, alarms) -> str:
             level = _limit_text(a.get("threshold"),
                                 (state.limits() or {}).get(a.get("channel")),
                                 view.unit if view is not None else "")
-            lines.append("  %-18s %s at %s, now %s" % (
-                a.get("channel"), str(a.get("state")).upper(), level, now))
+            onset = a.get("value")
+            onset = ("; went off at %g %s" % (onset, view.unit if view else "")
+                     if isinstance(onset, (int, float)) else "")
+            lines.append("  %-18s %s, now %s (%s%s)" % (
+                a.get("channel"), str(a.get("state")).upper(), now, level,
+                onset.rstrip()))
         lines.append("")
     lines.append("KEY READINGS")
     for label, name in (("main pressure", "pmain"), ("vacuum (P105)", "p105"),

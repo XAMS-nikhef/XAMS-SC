@@ -267,13 +267,14 @@ class TestDailyReportAlarmRows:
 
         _, html, text = mail.digest(state, self.NOW)
 
-        assert "MINOR at low (&lt; 100 kg), now 72.4" in html
-        assert "went off at 99.900" in html
-        assert "MINOR at low (< 100 kg), now 72.4" in text
+        assert "72.40 kg<br>" in html
+        assert "MINOR &middot; below 100 kg &middot; went off at 99.9 kg" in html
+        assert "ln2_mass - LN2 in the dewar<" in html
+        assert "MINOR, now 72.40 kg (below 100 kg; went off at 99.9 kg)" in text
 
     def test_without_published_limits_the_level_name_is_kept(self):
         assert mail._limit_text("low", None) == "low"
-        assert mail._limit_text("hihi", {"hihi": 35.0}, "C") == "hihi (> 35 C)"
+        assert mail._limit_text("hihi", {"hihi": 35.0}, "C") == "above 35 C"
         assert mail._limit_text("staleness", {"low": 1.0}) == "staleness"
 
 
