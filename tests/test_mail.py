@@ -12,6 +12,8 @@ The rules that matter:
   * nothing renders as a broken template when data is missing
 """
 
+import dataclasses
+import json
 from datetime import datetime, timezone
 
 import pytest
@@ -20,6 +22,7 @@ from zoneinfo import ZoneInfo
 
 from xams_sc.alarms import mail
 from xams_sc.alarms.engine import _ViewLike
+from xams_sc.model import iso
 
 WHEN = datetime(2026, 9, 18, 3, 14, 0, tzinfo=timezone.utc)
 
@@ -243,3 +246,44 @@ class TestTheClockTheEmailIsReadIn:
                                 context(), naive)
 
         assert "14:30:45" in html
+
+
+class TestDailyReportAlarmRows:
+    """18 November 2026: the LN2 alarm row showed the mass when the alarm went
+    off, labelled "now", while the LN2 row of the same report showed the mass
+    now. The row shows both, and the limit as a number."""
+
+    NOW = datetime(2026, 11, 18, 7, 0, 0, tzinfo=timezone.utc)
+
+    def test_the_row_shows_the_reading_now_and_at_onset(self, webui, monkeypatch):
+        _, app, _ = webui
+        state = app.state.system
+        monkeypatch.setattr(state, "channel", _fixed_view(state, "ln2_mass", 72.4))
+        state._on_alarm("xams/alarm/ln2_mass", json.dumps({
+            "state": "minor", "threshold": "low", "value": 99.9,
+            "since": iso(self.NOW), "acknowledged": False}))
+        state._on_status("xams/status/limits", json.dumps(
+            {"ln2_mass": {"low": 100.0, "lolo": 20.0}}))
+
+        _, html, text = mail.digest(state, self.NOW)
+
+        assert "MINOR at low (&lt; 100 kg), now 72.4" in html
+        assert "went off at 99.900" in html
+        assert "MINOR at low (< 100 kg), now 72.4" in text
+
+    def test_without_published_limits_the_level_name_is_kept(self):
+        assert mail._limit_text("low", None) == "low"
+        assert mail._limit_text("hihi", {"hihi": 35.0}, "C") == "hihi (> 35 C)"
+        assert mail._limit_text("staleness", {"low": 1.0}) == "staleness"
+
+
+def _fixed_view(state, name, value):
+    """`state.channel` with one channel pinned to a healthy reading."""
+    real = state.channel
+
+    def channel(n):
+        view = real(n)
+        if n != name or view is None:
+            return view
+        return dataclasses.replace(view, value=value, quality="ok", age_s=1.0)
+    return channel
