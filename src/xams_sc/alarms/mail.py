@@ -169,19 +169,62 @@ def _reading(view) -> str:
     return _esc(view.formatted()) + unit
 
 
-def _alarm_rows(alarms: list) -> list[tuple]:
+_BELOW = ("lolo", "low")
+_ABOVE = ("high", "hihi")
+
+
+def _number(value) -> str:
+    return f"{value:.3f}" if isinstance(value, (int, float)) else "&mdash;"
+
+
+def _limit_text(threshold, limits: dict | None, unit: str = "") -> str:
+    """"low (< 100 kg)" when the engine published the number, else "low".
+
+    The level name alone says which limit was crossed but not where it is;
+    the number is what the reader compares the reading with.
+    """
+    name = str(threshold or "?")
+    value = (limits or {}).get(name)
+    if not isinstance(value, (int, float)):
+        return name
+    sign = "<" if name in _BELOW else (">" if name in _ABOVE else "")
+    unit = f" {unit}" if unit else ""
+    return f"{name} ({sign} {value:g}{unit})" if sign else f"{name} ({value:g}{unit})"
+
+
+def _alarm_rows(alarms: list, state=None) -> list[tuple]:
+    """One row per active alarm.
+
+    The value in an alarm record is the reading when the alarm went OFF: the
+    engine publishes it on a transition only, not while the channel stays in
+    the same alarm. With `state` (the daily report) the row shows the reading
+    NOW next to it, so a report sent hours later does not show the onset
+    value as the current one (18 November 2026: the LN2 alarm row and the LN2
+    row of the same report disagreed). Without it (the alarm email, whose
+    context the engine fills with its latest values) the value is current.
+    """
+    limits = state.limits() if state is not None else None
     rows = []
     for a in alarms:
-        state = str(a.get("state", "?"))
-        value = a.get("value")
-        shown = f"{value:.3f}" if isinstance(value, (int, float)) else "&mdash;"
-        label = a.get("channel", "?")
+        severity = str(a.get("state", "?"))
+        channel = a.get("channel", "?")
+        label = channel
         if a.get("description"):
             label = f"{label} - {a['description']}"
-        detail = f"{state.upper()} at {a.get('threshold') or '?'}, now {shown}"
+        view = state.channel(channel) if state is not None else None
+        unit = view.unit if view is not None else ""
+        level = _esc(_limit_text(a.get("threshold"),
+                                 (limits or {}).get(channel), unit))
+        if state is None:
+            detail = f"{severity.upper()} at {level}, now {_number(a.get('value'))}"
+        else:
+            now = (_esc(view.formatted()) + (f" {_esc(unit)}" if unit else "")
+                   if view is not None and view.healthy else "&mdash;")
+            detail = (f"{severity.upper()} at {level}, now {now} "
+                      f"(went off at {_number(a.get('value'))})")
         if a.get("acknowledged"):
             detail += " (acknowledged)"
-        rows.append((label, detail, colour_for(state)))
+        rows.append((label, detail, colour_for(severity)))
     return rows
 
 
@@ -219,7 +262,7 @@ def digest(state, when: datetime) -> tuple[str, str, str]:
 
     if alarms:
         body.append(heading("Active alarms"))
-        body.append(table(_alarm_rows(alarms)))
+        body.append(table(_alarm_rows(alarms, state)))
 
     body.append(heading("Key readings"))
     body.append(table([
@@ -310,9 +353,14 @@ def _digest_text(state, when, word, detail, alarms) -> str:
     if alarms:
         lines.append("ACTIVE ALARMS")
         for a in alarms:
-            lines.append("  %-18s %s at %s" % (a.get("channel"),
-                                               str(a.get("state")).upper(),
-                                               a.get("threshold")))
+            view = state.channel(a.get("channel"))
+            now = (view.formatted() + " " + view.unit
+                   if view is not None and view.healthy else "--")
+            level = _limit_text(a.get("threshold"),
+                                (state.limits() or {}).get(a.get("channel")),
+                                view.unit if view is not None else "")
+            lines.append("  %-18s %s at %s, now %s" % (
+                a.get("channel"), str(a.get("state")).upper(), level, now))
         lines.append("")
     lines.append("KEY READINGS")
     for label, name in (("main pressure", "pmain"), ("vacuum (P105)", "p105"),
